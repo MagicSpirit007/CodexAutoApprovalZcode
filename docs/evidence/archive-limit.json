@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-01",
+  "hostCommit": "29628c9acdb81b703bbd4080c207a0e7ce5e276e",
+  "singleFileLimitBytes": 52428800,
+  "nodeExecutableBytes": 85268464,
+  "archiveInstallerRejectsBundledRuntime": true,
+  "message": "Plugin zip entry exceeds single file limit: plugins/codex-auto-approval/runtime/node.exe",
+  "requiredInstallation": "Extract ZIP with OS tools, then add local marketplace directory."
+}

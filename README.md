@@ -16,19 +16,17 @@
 
 适配桌面使用独立应用身份 `ZCode AutoReview`，可以与原版并存。已有旧适配版运行时，先退出旧版再启动新版；无需 `.cmd` 启动包装。按 ZCode 正常流程配置模型，并打开本地工作区。
 
-### 2. 从 GitHub 安装插件
+### 2. 安装插件 ZIP
 
-在桌面 **设置 → 插件 → 创建 → 添加 marketplace** 中输入：
+下载 [CodexAutoApproval-plugin-0.1.1.zip](https://github.com/MagicSpirit007/CodexAutoApprovalZcode/releases/download/v0.1.1/CodexAutoApproval-plugin-0.1.1.zip)，解压到任意目录。
 
-```text
-https://github.com/MagicSpirit007/CodexAutoApprovalZcode
-```
+在桌面 **设置 → 插件 → 创建 → 添加 marketplace** 中，选择**包含 marketplace.json 的解压目录**，然后安装并启用 **CodexAutoApproval**。不要直接选择 ZIP 文件，也不要选择其内部的插件子目录。
 
-也可以输入 `MagicSpirit007/CodexAutoApprovalZcode`。选择 **CodexAutoApproval**，安装并启用。
+插件包提供相对路径 marketplace、Windows Node 运行时、审批代码和策略；安装后不依赖解压目录或源码，也无需另装 Node。[ZCode 官方安装规范](https://zcode.z.ai/en/docs/plugin)支持本地 marketplace。
 
-仓库根目录提供 `marketplace.json`，插件位于 `plugins/codex-auto-approval/`。随插件包含 Windows Node 运行时、审批代码和策略；安装后不依赖这个源码目录。[ZCode 官方插件安装规范](https://zcode.z.ai/en/docs/plugin)支持 GitHub marketplace 与本地目录。
+插件技术安装 ID 为 `codex-auto-approval@codex-auto-review-local`；保留它是为了兼容已有安装，显示名称为 CodexAutoApproval。
 
-插件的技术安装 ID 为 `codex-auto-approval@codex-auto-review-local`；保留该 ID 是为了兼容已有安装，显示名称为 CodexAutoApproval。
+**0.1.1 请使用上述本地安装方式。** 此版本宿主的 GitHub 归档安装器限制单文件 50 MiB，插件自带 node.exe 约 81 MiB，因此直接输入 GitHub 仓库地址的安装路线不适用于本版。仓库用于分发源码和 Release；不会要求用户自行构建。
 
 ### 3. 新建会话并选择权限选项
 
@@ -40,9 +38,7 @@ https://github.com/MagicSpirit007/CodexAutoApprovalZcode
 
 工作区有任务运行时，权限切换会锁住。已有会话停用后重新启用，需要新建会话，菜单会提示原因；ZCode 的 PermissionRequest Hook 在创建会话时加载。
 
-### 离线安装
-
-下载 [CodexAutoApproval-plugin-0.1.1.zip](https://github.com/MagicSpirit007/CodexAutoApprovalZcode/releases/download/v0.1.1/CodexAutoApproval-plugin-0.1.1.zip)，解压后，在「添加 marketplace」中选择**包含 marketplace.json 的解压目录**，再安装、启用并新建会话。插件 ZIP 与 GitHub marketplace 提供相同的运行代码。
+### 校验下载
 
 Release 同时提供 [SHA256SUMS.txt](https://github.com/MagicSpirit007/CodexAutoApprovalZcode/releases/download/v0.1.1/SHA256SUMS.txt)，可用 PowerShell 校验下载文件：
 
@@ -102,7 +98,7 @@ Get-FileHash .\CodexAutoApproval-plugin-0.1.1.zip -Algorithm SHA256
 ## 开发与目录
 
 ```text
-marketplace.json             GitHub / 本地安装入口
+marketplace.json             本地安装入口（与插件 ZIP 一同提供）
 plugins/codex-auto-approval/  自包含 Windows 插件、Hook、运行时和策略
 src/                        可复用审批核心与桌面客户端
 prompts/                    默认风险策略与评估模板

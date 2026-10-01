@@ -68,6 +68,6 @@ python scripts/build-release.py
 
 菜单通过原生插件服务写入工作区启停设置；原生权限模式、Plan 约束和更新机制保留。官方更新可能替换适配代码，升级后需重新核对桥和菜单。
 
-公开 [Hooks](https://zcode.z.ai/en/docs/hooks) 不提供完整运行时授权来源及当前模型句柄，因此完整功能需要宿主补丁。[插件规范](https://zcode.z.ai/en/docs/plugin)负责插件安装，不能代替宿主桥。凭据留在宿主，不传入插件。
+公开 [Hooks](https://zcode.z.ai/en/docs/hooks) 不提供完整运行时授权来源及当前模型句柄，因此完整功能需要宿主补丁。[插件规范](https://zcode.z.ai/en/docs/plugin)负责插件安装，不能代替宿主桥。0.1.1 需手动解压插件 ZIP 后添加本地 marketplace；GitHub 归档入口有单文件 50 MiB 限制，小于随包 Node。凭据留在宿主，不传入插件。
 
 本次实测与已知限制见 [验收记录](../docs/desktop-acceptance.md)；SSH、WSL、远程工作区和其他桌面系统仍未验证。

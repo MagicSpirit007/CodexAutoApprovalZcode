@@ -60,9 +60,11 @@
 
 ## 安装与复验
 
-从 Release 解压适配桌面并直接运行 ZCode.exe。插件可从 GitHub marketplace 或插件 ZIP 解压目录安装；启用后新建会话，选择权限菜单中的 CodexAutoApproval。工作区有任务运行时锁住切换；启停作用于整个工作区。选择原生权限会停用工作区插件，Plan 保持独立限制。
+从 Release 解压适配桌面并直接运行 ZCode.exe。插件从 Release 的插件 ZIP 解压目录安装；启用后新建会话，选择权限菜单中的 CodexAutoApproval。工作区有任务运行时锁住切换；启停作用于整个工作区。选择原生权限会停用工作区插件，Plan 保持独立限制。
 
 停用或卸载后新建会话，恢复宿主原生权限流程。原版桌面缺少桥时回人工。官方更新机制保留；升级后须重新核对菜单和桥。
+
+0.1.1 不支持直接输入 GitHub 仓库地址安装：固定宿主的 ZIP 归档安装器限制单文件 50 MiB，而随包 node.exe 为 81.32 MiB。手动解压 ZIP 后添加本地 marketplace 不受此归档入口限制。[原生归档限制实测](evidence/archive-limit.json)确认运行时被拒；[解压目录安装复验](evidence/zip-installation.json)通过，Hook 一项、诊断为空、随包运行时哈希一致。网络安装核验另遇到 GitHub 下载超时，不计为通过。
 
 基础复验：`npm test`、`npm run check`。准备固定宿主后执行 `npm run test:desktop`；完整重建步骤见 [宿主说明](../host-adapter/README.md)。CI 自动执行核心测试，不代替 GUI 或真实外部模型验收。
 

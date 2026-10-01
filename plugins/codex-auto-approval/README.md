@@ -4,7 +4,7 @@
 
 把发行 ZIP 解压到任意目录，直接启动配套桌面的 `ZCode.exe`，打开一个本地工作区。进入「设置 → 插件 → 创建 → 添加 marketplace」，选择解压后含 `marketplace.json` 的目录，安装并启用 **CodexAutoApproval**，再新建会话，在权限菜单选择 **CodexAutoApproval**。内部安装 ID 仍为 `codex-auto-approval@codex-auto-review-local`，显示名称独立设置。
 
-配套新版 exe 已内置独立应用身份，无需 `Launch-AutoReview.cmd`。审批能力来自宿主的审批桥补丁；官方公开 Hook 不提供当前会话模型调用句柄。发布 GitHub marketplace 可以简化插件安装，但完整功能仍需兼容的宿主桥，不能标成原版安装即用。
+配套新版 exe 已内置独立应用身份，无需 `Launch-AutoReview.cmd`。审批能力来自宿主的审批桥补丁；官方公开 Hook 不提供当前会话模型调用句柄。0.1.1 使用 Release 插件 ZIP 解压后的本地 marketplace 安装；宿主 GitHub 归档入口的单文件 50 MiB 限制小于随包 Node，不支持直接输入仓库地址安装。完整功能仍需兼容的宿主桥，不能标成原版安装即用。
 
 权限菜单中的 CodexAutoApproval 会启用本工作区插件，审批模型跟随当前会话。选回原生「变更前确认」「自动编辑」或「完全访问」会先停用本工作区插件，再切换原生权限。「计划模式」仍是独立约束。启停适用于整个工作区，不影响其他工作区的设置；该工作区有任务运行时不可切换。
 

@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-01",
+  "source": "CodexAutoApproval-plugin-0.1.1.zip extracted locally",
+  "pluginId": "codex-auto-approval@codex-auto-review-local",
+  "version": "0.1.1",
+  "hookCount": 1,
+  "diagnostics": 0,
+  "bundledRuntimeMatches": true,
+  "absentBridgeBehavior": "ask",
+  "userConfigurationModified": false
+}

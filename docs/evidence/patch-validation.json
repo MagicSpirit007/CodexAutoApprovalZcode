@@ -2,7 +2,7 @@
   "upstreamCommit": "29628c9acdb81b703bbd4080c207a0e7ce5e276e",
   "cleanApplyCheck": true,
   "appliedFilesMatchWorkspace": true,
-  "patchSha256": "6523c6cc34c165d2d7b7c0ae23437153374f29b05caaef2bded984160c505abe",
+  "patchSha256": "d1995af1ba6588ca5279b3f3c7ca22ebae2835ef0fb6fec1800cf3bb43ca987d",
   "files": [
     "apps/zcode-cli/packages/adapters/src/exec/index.ts",
     "apps/zcode-cli/packages/adapters/src/model/retry-budget.ts",

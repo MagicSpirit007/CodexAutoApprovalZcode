@@ -68,6 +68,10 @@
 
 基础复验：`npm test`、`npm run check`。准备固定宿主后执行 `npm run test:desktop`；完整重建步骤见 [宿主说明](../host-adapter/README.md)。CI 自动执行核心测试，不代替 GUI 或真实外部模型验收。
 
+## 菜单文案更新
+
+常规中文说明改为“由Codex迁移的自动审批”。本次重新执行宿主类型、lint 和架构检查，并在隔离的真实 Windows 桌面核对精确文案和四个权限选项，见 [文案实测](evidence/subtitle-verification.json)。类型与架构通过，lint 为 0 错误、70 个既有警告；审批逻辑未变。本次只复验菜单显示，前述完整功能结果保留其原验收范围。
+
 ## 未支持与未实测
 
 真实外部模型认证、计费、各提供商返回格式和网络恢复未实测。SSH、WSL、远程工作区与非 Windows 桌面未验证。Cyber 单拒熔断、Codex 专用 reviewer 服务、完整 OS 沙箱、网络代理和全部工具未移植。

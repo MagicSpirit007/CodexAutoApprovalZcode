@@ -9,10 +9,11 @@
   "bridgeProtocol": 1,
   "applicationIdentity": "ZCode AutoReview",
   "permissionOption": "CodexAutoApproval",
+  "permissionSubtitleZh": "由Codex迁移的自动审批",
   "originalAgentSha256": "fad4c35c4c36ec210d8a06d3fa0e77de23c8545e2eb6ff90aea1eb38d1e6275f",
   "adaptedAgentSha256": "47016979f82a8cb6b7f390bb12fa275cf162fb44538972e4d797bfbb0bd0df31",
   "originalDesktopAsarSha256": "172d6f333e61642ce3882250949fafe8180f75b5b8e5552244ca2c59ca05d14e",
-  "adaptedDesktopAsarSha256": "a3b6a7d9daec3a87499c570ec161b5c2deebfdc80eed7996b00c7436a0e09cde",
+  "adaptedDesktopAsarSha256": "e073fb04ca89a8dd6f08052f4e6e787c0ced301882cfd9cf89d615d136479058",
   "changes": [
     "Approval bridge and current-model adapter",
     "PermissionRequest ask/interrupt",

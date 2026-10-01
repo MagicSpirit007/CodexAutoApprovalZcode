@@ -1,0 +1,5 @@
+zcode
+Includes approval policy and approval lifecycle semantics derived from OpenAI Codex.
+Copyright 2025 OpenAI. Licensed under Apache License 2.0; see LICENSE.
+Source revision: d42056091aded7feb1d88ac7e83972108b2aa478.
+Modified for standalone zcode runtime; no Codex runtime dependency.

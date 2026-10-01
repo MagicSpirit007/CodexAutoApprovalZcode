@@ -1,0 +1,51 @@
+{
+  "source": "extracted plugin ZIP",
+  "directExecutableStartup": true,
+  "applicationIdentityOverride": false,
+  "results": [
+    {
+      "scenario": "permission-menu",
+      "passed": true,
+      "options": 4,
+      "keyboardEnable": true,
+      "nativeEditDisables": true,
+      "planIndependent": true
+    },
+    {
+      "scenario": "allow",
+      "passed": true,
+      "humanFallback": false,
+      "reviewerCalls": 1
+    },
+    {
+      "scenario": "deny",
+      "passed": true,
+      "humanFallback": false,
+      "reviewerCalls": 1
+    },
+    {
+      "scenario": "failure",
+      "passed": true,
+      "humanFallback": true,
+      "reviewerCalls": 1
+    },
+    {
+      "scenario": "disabled",
+      "passed": true,
+      "humanFallback": true,
+      "reviewerCalls": 0
+    },
+    {
+      "scenario": "uninstalled",
+      "passed": true,
+      "humanFallback": true,
+      "reviewerCalls": 0
+    },
+    {
+      "scenario": "plugin-display-name",
+      "passed": true,
+      "displayName": "CodexAutoApproval"
+    }
+  ],
+  "note": "Local HTTP model fixture; personal filesystem paths omitted."
+}

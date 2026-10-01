@@ -1,0 +1,1285 @@
+diff --git a/apps/zcode-cli/packages/adapters/src/exec/index.ts b/apps/zcode-cli/packages/adapters/src/exec/index.ts
+index 49db04f..3d53444 100644
+--- a/apps/zcode-cli/packages/adapters/src/exec/index.ts
++++ b/apps/zcode-cli/packages/adapters/src/exec/index.ts
+@@ -9,3 +9,5 @@ export type { ResolvedSpawnCommand } from "./execution-command.js";
+ export type { NodeExecutionAdapterOptions } from "./execution-adapter-types.js";
+ export { createNodeExecutionAdapter, NodeExecutionAdapter } from "./node-execution-adapter.js";
+ export { decodeExecutionOutputBuffer } from "./outputEncoding.js";
++export { createNodeApprovalBridge } from "./approval-bridge.js";
++export { createConfiguredNodeApprovalBridge } from "./approval-plugin-activity.js";
+diff --git a/apps/zcode-cli/packages/adapters/src/model/retry-budget.ts b/apps/zcode-cli/packages/adapters/src/model/retry-budget.ts
+index 42de6d4..d32d3a0 100644
+--- a/apps/zcode-cli/packages/adapters/src/model/retry-budget.ts
++++ b/apps/zcode-cli/packages/adapters/src/model/retry-budget.ts
+@@ -21,6 +21,7 @@ export function retryBudgetAllows(
+   retryBudgetAttempt: number,
+   maxAttempts: number,
+ ): boolean {
++  if (budget === ModelRetryBudget.SingleAttempt) return false;
+   return isUnboundedRetryBudget(budget) || retryBudgetAttempt < maxAttempts;
+ }
+ 
+@@ -30,6 +31,7 @@ export function retryAttemptLoopContinues(
+   attempt: number,
+   loopMaxAttempts: number,
+ ): boolean {
++  if (budget === ModelRetryBudget.SingleAttempt) return attempt <= 1;
+   return isUnboundedRetryBudget(budget) || attempt <= loopMaxAttempts;
+ }
+ 
+@@ -38,5 +40,6 @@ export function retryBudgetMaxAttempts(
+   budget: ModelRetryBudget | undefined,
+   maxAttempts: number,
+ ): number {
++  if (budget === ModelRetryBudget.SingleAttempt) return 1;
+   return isUnboundedRetryBudget(budget) ? UNBOUNDED_RETRY_MAX_ATTEMPTS : maxAttempts;
+ }
+diff --git a/apps/zcode-cli/packages/bootstrap/src/app/create-app.ts b/apps/zcode-cli/packages/bootstrap/src/app/create-app.ts
+index feab6b9..35886b1 100644
+--- a/apps/zcode-cli/packages/bootstrap/src/app/create-app.ts
++++ b/apps/zcode-cli/packages/bootstrap/src/app/create-app.ts
+@@ -6,6 +6,7 @@ import {
+ import { createNodeLoggerFactory } from "@zcode/adapters/logging";
+ import { createConfig, resolvePath } from "@zcode/adapters/config";
+ import {
++  createConfiguredNodeApprovalBridge,
+   createNodeExecutionAdapter,
+   resolveEffectiveBashShellSelection,
+ } from "@zcode/adapters/exec";
+@@ -762,6 +763,9 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
+       eventSink: options.eventSink,
+       modelFactory,
+       modelIoDir,
++      approvalBridgeFactory: createConfiguredNodeApprovalBridge([
++        configResult.sources.user.path, ...configResult.sources.project.paths,
++      ]),
+       providerRuntimeHeadersPort: options.providerRuntimeHeadersPort,
+       resolveEffectiveModelSelection: options.resolveEffectiveModelSelection,
+       isRemoteWorkspace: () =>
+diff --git a/apps/zcode-cli/packages/contracts/src/hooks/index.ts b/apps/zcode-cli/packages/contracts/src/hooks/index.ts
+index 36d33cd..b351a12 100644
+--- a/apps/zcode-cli/packages/contracts/src/hooks/index.ts
++++ b/apps/zcode-cli/packages/contracts/src/hooks/index.ts
+@@ -1,4 +1,6 @@
+ import { z } from "zod";
++import { approvalBindingFields, type ApprovalAssessment } from "./approval-assessment.js";
++export type { ApprovalAssessment } from "./approval-assessment.js";
+ import type { ModelToolSideEffectScope } from "../model/index.js";
+ import type { CollaborationMode, RiskLevel } from "../interfaces/session.port.js";
+ import type { PermissionUpdate } from "../interfaces/permission.port.js";
+@@ -147,7 +149,10 @@ export type HookInput =
+   | SessionStartHookInput
+   | StopHookInput;
+ 
+-export type PermissionRequestHookDecision =
++export type PermissionRequestHookDecision = {
++  bindingId?: string;
++  assessment?: ApprovalAssessment;
++} & (
+   | {
+       behavior: "allow";
+       permissionUpdates?: PermissionUpdate[];
+@@ -158,7 +163,9 @@ export type PermissionRequestHookDecision =
+       behavior: "deny";
+       interrupt?: boolean;
+       message?: string;
+-    };
++    }
++  | { behavior: "ask"; message?: string }
++);
+ 
+ export type HookSpecificOutput =
+   | {
+@@ -207,6 +214,7 @@ export interface HookJSONOutput {
+ 
+ const PermissionRequestHookDecisionSchema = z.union([
+   z.object({
++    ...approvalBindingFields,
+     behavior: z.literal("allow"),
+     permissionUpdates: z
+       .array(
+@@ -239,10 +247,12 @@ const PermissionRequestHookDecisionSchema = z.union([
+     updatedInput: z.unknown().optional(),
+   }),
+   z.object({
++    ...approvalBindingFields,
+     behavior: z.literal("deny"),
+     interrupt: z.boolean().optional(),
+     message: z.string().optional(),
+   }),
++  z.object({ behavior: z.literal("ask"), message: z.string().optional() }),
+ ]);
+ 
+ export const HookSpecificOutputSchema = z.discriminatedUnion("hookEventName", [
+diff --git a/apps/zcode-cli/packages/contracts/src/index.ts b/apps/zcode-cli/packages/contracts/src/index.ts
+index c2fe6db..ec05ee2 100644
+--- a/apps/zcode-cli/packages/contracts/src/index.ts
++++ b/apps/zcode-cli/packages/contracts/src/index.ts
+@@ -104,3 +104,4 @@ export * from "./tracing/local-turn-preparation.js";
+ export type { LocalTtftDetail } from "@zcode/shared";
+ 
+ export * from "./interfaces/permission-full-access.js";
++export * from "./interfaces/approval-bridge.port.js";
+diff --git a/apps/zcode-cli/packages/contracts/src/interfaces/permission.port.ts b/apps/zcode-cli/packages/contracts/src/interfaces/permission.port.ts
+index 9548dff..0186299 100644
+--- a/apps/zcode-cli/packages/contracts/src/interfaces/permission.port.ts
++++ b/apps/zcode-cli/packages/contracts/src/interfaces/permission.port.ts
+@@ -69,6 +69,8 @@ export interface PermissionBrokerRequest {
+ }
+ 
+ export interface PermissionBrokerResult {
++  /** A denied hook can stop only this turn after feedback is delivered. */
++  interrupt?: boolean;
+   decision: PermissionDecision;
+   reason?: string;
+   /** V4 permission feedback 需要保留 provider-visible 原文；只由 broker 结果携带。 */
+diff --git a/apps/zcode-cli/packages/contracts/src/model/index.ts b/apps/zcode-cli/packages/contracts/src/model/index.ts
+index 58a7192..1311e96 100644
+--- a/apps/zcode-cli/packages/contracts/src/model/index.ts
++++ b/apps/zcode-cli/packages/contracts/src/model/index.ts
+@@ -39,6 +39,7 @@ export const ModelRequestSessionType = {
+  *   workflow 错误，唯一出口是用户 cancel。
+  */
+ export const ModelRetryBudget = {
++  SingleAttempt: "single_attempt",
+   Default: "default",
+   Unbounded: "unbounded",
+ } as const;
+diff --git a/apps/zcode-cli/packages/core/src/hooks/configured-runner-callback.ts b/apps/zcode-cli/packages/core/src/hooks/configured-runner-callback.ts
+index 96b6bf8..b404091 100644
+--- a/apps/zcode-cli/packages/core/src/hooks/configured-runner-callback.ts
++++ b/apps/zcode-cli/packages/core/src/hooks/configured-runner-callback.ts
+@@ -23,6 +23,57 @@ export function createConfiguredHookCallback(
+   hookIndex: number,
+   execution: { maxOutputBytes: number; timeoutMs: number },
+ ): HookCallback {
++  const isReviewer = event === HookEventName.PermissionRequest && hook.plugin?.name === "codex-auto-approval";
++  if (!isReviewer) return createProcessHookCallback(options, event, hook, matcherIndex, hookIndex, execution);
++  return async (input, context) => {
++    const ask = (message: string): HookJSONOutput => ({ hookSpecificOutput: {
++      hookEventName: HookEventName.PermissionRequest, decision: { behavior: "ask", message },
++    } });
++    if (input.hookEventName !== HookEventName.PermissionRequest || !input.turnId || !options.approvalBridgePort) {
++      return ask("The adapted desktop approval bridge is unavailable");
++    }
++    const deadline = Date.now() + 90000;
++    const timeoutSignal = AbortSignal.timeout(90000);
++    const signal = context.signal ? AbortSignal.any([context.signal, timeoutSignal]) : timeoutSignal;
++    for (let attempt = 0; attempt < 3; attempt++) {
++      signal.throwIfAborted();
++      const lease = await options.approvalBridgePort.open(input, signal, hook.plugin);
++      try {
++        const callback = createProcessHookCallback(options, event, hook, matcherIndex, hookIndex,
++          { ...execution, timeoutMs: Math.min(execution.timeoutMs, deadline - Date.now()) }, lease.env);
++        const result = await callback(input, { ...context, signal });
++        signal.throwIfAborted();
++        const output = result && "kind" in result ? result.output : result;
++        const validated = lease.finish(output || undefined);
++        const specific = validated.hookSpecificOutput;
++        if (specific?.hookEventName === HookEventName.PermissionRequest &&
++          specific.decision?.behavior === "ask" && specific.decision.message?.startsWith("STALE_CONTEXT:") && attempt < 2) continue;
++        return validated;
++      } catch (error) {
++        context.signal?.throwIfAborted();
++        return ask(`Automatic review unavailable: ${error instanceof Error ? error.message : String(error)}`);
++      } finally { await lease.close(); }
++    }
++    return ask("Automatic review context kept changing");
++  };
++}
++
++function createProcessHookCallback(
++  options: ConfiguredHookRunnerOptions,
++  event: HookEventName,
++  hook: HookConfig,
++  matcherIndex: number,
++  hookIndex: number,
++  execution: { maxOutputBytes: number; timeoutMs: number },
++  bridgeEnv?: Record<string, string>,
++): HookCallback {
++  const env = (input: HookInput) => {
++    const overlay = createPluginEnvOverlay(hook.plugin, input, options.getWorkingDirectory());
++    return { ...overlay,
++      ...(bridgeEnv ? {} : { unset: ["ZCODE_APPROVAL_BRIDGE_SOCKET", "ZCODE_APPROVAL_BRIDGE_TOKEN", "ZCODE_APPROVAL_BRIDGE_VERSION"] }),
++      set: { ...overlay.set, ...bridgeEnv },
++    };
++  };
+   switch (hook.type) {
+     case "command":
+       return async (input, context) => {
+@@ -41,7 +92,7 @@ export function createConfiguredHookCallback(
+                 shell: hook.shell,
+               },
+               cwd: input.cwd || options.getWorkingDirectory(),
+-              env: createPluginEnvOverlay(hook.plugin, input, options.getWorkingDirectory()),
++              env: env(input),
+               stdin: stdin.value,
+               timeoutMs: execution.timeoutMs,
+               outputLimit: {
+@@ -86,7 +137,7 @@ export function createConfiguredHookCallback(
+                 ),
+               },
+               cwd: input.cwd || options.getWorkingDirectory(),
+-              env: createPluginEnvOverlay(hook.plugin, input, options.getWorkingDirectory()),
++              env: env(input),
+               stdin: stdin.value,
+               timeoutMs: execution.timeoutMs,
+               outputLimit: {
+diff --git a/apps/zcode-cli/packages/core/src/hooks/output.ts b/apps/zcode-cli/packages/core/src/hooks/output.ts
+index 2cb3516..a182682 100644
+--- a/apps/zcode-cli/packages/core/src/hooks/output.ts
++++ b/apps/zcode-cli/packages/core/src/hooks/output.ts
+@@ -82,7 +82,16 @@ export function mergeHookRunResult(target: HookRunResult, next: HookRunResult):
+     target.updatedInput = next.updatedInput;
+   }
+   if (next.permissionRequestResult) {
+-    target.permissionRequestResult = next.permissionRequestResult;
++    const priority = { allow: 0, ask: 1, deny: 2 };
++    if (target.permissionRequestResult?.behavior === "deny" && next.permissionRequestResult.behavior === "deny") {
++      target.permissionRequestResult = { ...next.permissionRequestResult,
++        interrupt: target.permissionRequestResult.interrupt || next.permissionRequestResult.interrupt,
++        message: [target.permissionRequestResult.message, next.permissionRequestResult.message].filter(Boolean).join("\n"),
++      };
++    } else if (!target.permissionRequestResult ||
++      priority[next.permissionRequestResult.behavior] >= priority[target.permissionRequestResult.behavior]) {
++      target.permissionRequestResult = next.permissionRequestResult;
++    }
+   }
+   if (next.hookPermissionDecisionReason) {
+     target.hookPermissionDecisionReason = next.hookPermissionDecisionReason;
+diff --git a/apps/zcode-cli/packages/core/src/hooks/types.ts b/apps/zcode-cli/packages/core/src/hooks/types.ts
+index 017dde1..160da83 100644
+--- a/apps/zcode-cli/packages/core/src/hooks/types.ts
++++ b/apps/zcode-cli/packages/core/src/hooks/types.ts
+@@ -1,4 +1,5 @@
+ import type {
++  ApprovalBridgePort,
+   ExecutionPort,
+   HookEventName,
+   HookExecutionDescriptor,
+@@ -93,6 +94,7 @@ export interface HookRunnerOptions {
+ }
+ 
+ export interface ConfiguredHookRunnerOptions {
++  approvalBridgePort?: ApprovalBridgePort;
+   config: HooksRuntimeConfig;
+   emitEvent?: (event: SessionEvent) => Promise<void>;
+   executionPort: ExecutionPort;
+diff --git a/apps/zcode-cli/packages/core/src/runtime/helpers/runtime-tools.ts b/apps/zcode-cli/packages/core/src/runtime/helpers/runtime-tools.ts
+index 2c9f2ee..223b9ad 100644
+--- a/apps/zcode-cli/packages/core/src/runtime/helpers/runtime-tools.ts
++++ b/apps/zcode-cli/packages/core/src/runtime/helpers/runtime-tools.ts
+@@ -22,6 +22,7 @@ import {
+ import { isStaleBranchRuntimeTaskEvent } from "../methods/runtime-command-generation.js";
+ import { resolveEnabledProjectMemoryRoot } from "./project-memory.js";
+ import { sessionHasLoadedSkill } from "../../agent/loaded-skills.js";
++import { createRuntimeApprovalBridge } from "./approval-bridge.js";
+ 
+ const DEFAULT_SUBAGENT_BACKGROUND_BASH_MAX_MS = 3_600_000;
+ const EMPTY_RUNTIME_HOOK_CONFIG = {
+@@ -100,6 +101,8 @@ function createRuntimeHookRunner(
+             await runtime.appendEvent(event, getCurrentTraceContext() ?? runtime.rootTraceContext);
+           },
+           executionPort: deps.executionPort,
++          approvalBridgePort: deps.approvalBridgeFactory
++            ? createRuntimeApprovalBridge(runtime, deps.approvalBridgeFactory) : undefined,
+           getWorkingDirectory: () => runtime.workingDirectory,
+           logger: runtime.logger,
+           workspaceHookAdmission: deps.workspaceHookAdmission,
+diff --git a/apps/zcode-cli/packages/core/src/runtime/methods/runtime-model.ts b/apps/zcode-cli/packages/core/src/runtime/methods/runtime-model.ts
+index 39ddb0b..d1d849f 100644
+--- a/apps/zcode-cli/packages/core/src/runtime/methods/runtime-model.ts
++++ b/apps/zcode-cli/packages/core/src/runtime/methods/runtime-model.ts
+@@ -7,6 +7,7 @@ import {
+   type ModelInvocationContext,
+   type ModelRequest,
+ } from "../deps.js";
++import type { ModelRetryBudget } from "@zcode/contracts";
+ import type { AgentRuntimeInternal } from "../internal.js";
+ import type { RuntimeModelFactoryInput } from "../types.js";
+ import { resolveModelRetryBudgetFromTaskType } from "./model-request-session-type.js";
+@@ -16,6 +17,7 @@ export function createRuntimeModel(
+   input: Omit<RuntimeModelFactoryInput, "selection"> & {
+     selection: RuntimeModelFactoryInput["selection"] | undefined;
+   },
++  retryBudget?: ModelRetryBudget,
+ ): Model {
+   // 未绑定 Session 可恢复历史；仅在执行入口拒绝缺失选择，Factory 契约仍严格。
+   if (!input.selection) {
+@@ -26,6 +28,7 @@ export function createRuntimeModel(
+   return withRuntimeInvocationLayer(
+     runtime,
+     runtime.modelFactory({ ...input, selection: input.selection }),
++    retryBudget,
+   );
+ }
+ 
+@@ -39,9 +42,9 @@ export function createRuntimeModel(
+  * 工厂绑定一次；`withModelInvocationContext` 的合并顺序让本层压过调用层，没有逐调用退出口：
+  * 想不受闸门约束的 runtime 本来就不带准入端口。
+  */
+-function withRuntimeInvocationLayer(runtime: AgentRuntimeInternal, model: Model): Model {
++function withRuntimeInvocationLayer(runtime: AgentRuntimeInternal, model: Model, retryBudget?: ModelRetryBudget): Model {
+   const layer: ModelInvocationContext = {
+-    modelRetryBudget: resolveModelRetryBudgetFromTaskType(runtime.config.taskType),
++    modelRetryBudget: retryBudget ?? resolveModelRetryBudgetFromTaskType(runtime.config.taskType),
+     ...(runtime.modelRequestAdmission === undefined
+       ? {}
+       : { modelRequestAdmission: runtime.modelRequestAdmission }),
+diff --git a/apps/zcode-cli/packages/core/src/runtime/methods/turn-model.ts b/apps/zcode-cli/packages/core/src/runtime/methods/turn-model.ts
+index 3fb2fe3..cf340ba 100644
+--- a/apps/zcode-cli/packages/core/src/runtime/methods/turn-model.ts
++++ b/apps/zcode-cli/packages/core/src/runtime/methods/turn-model.ts
+@@ -1,6 +1,7 @@
+ import {
+   SESSION_ENTRY_MODEL_SELECTION,
+   type Model,
++  type ModelRetryBudget,
+   type ModelSelection,
+   type TraceContext,
+   type TurnInputIntentMetadata,
+@@ -17,13 +18,14 @@ export function createTurnModel(
+   options: {
+     selection?: ModelSelection;
+     requestDependencies?: import("@zcode/contracts").ModelRequestDependencies;
++    retryBudget?: ModelRetryBudget;
+   } = {},
+ ): Model {
+   const selection = options.selection ?? runtime.getSessionModelSelection();
+   const model = createRuntimeModel(runtime, {
+     selection,
+     requestDependencies: options.requestDependencies,
+-  });
++  }, options.retryBudget);
+   return withModelInvocationContext(model, (request) => ({
+     refreshRuntimeHeadersBeforeAttempt: createRefreshRuntimeHeadersBeforeModelAttempt(runtime, {
+       abortSignal: request.abortSignal,
+diff --git a/apps/zcode-cli/packages/core/src/runtime/types.ts b/apps/zcode-cli/packages/core/src/runtime/types.ts
+index 0004408..a606e1c 100644
+--- a/apps/zcode-cli/packages/core/src/runtime/types.ts
++++ b/apps/zcode-cli/packages/core/src/runtime/types.ts
+@@ -1,4 +1,4 @@
+-import type { RuntimeInputPresentation } from "@zcode/contracts";
++import type { ApprovalBridgeFactory, RuntimeInputPresentation } from "@zcode/contracts";
+ /* eslint-disable max-lines -- Runtime 类型集中承载 core/runtime 对外结构，拆分需要单独迁移。 */
+ import { PermissionService, ToolScheduler } from "./deps.js";
+ import type {
+@@ -307,6 +307,7 @@ export interface MemoryRuntimeConfig {
+ }
+ 
+ export interface AgentRuntimeDeps {
++  approvalBridgeFactory?: ApprovalBridgeFactory;
+   agentTelemetry?: AgentExecutionTelemetryPort;
+   agentTelemetryCausation?: AgentTelemetryCausation;
+   agentTelemetryCausationMode?: "child" | "linked_root";
+diff --git a/apps/zcode-cli/packages/core/src/tool/executor/errors.ts b/apps/zcode-cli/packages/core/src/tool/executor/errors.ts
+index 062f3f8..89d452e 100644
+--- a/apps/zcode-cli/packages/core/src/tool/executor/errors.ts
++++ b/apps/zcode-cli/packages/core/src/tool/executor/errors.ts
+@@ -96,9 +96,10 @@ export function createPermissionErrorResult(
+   context: Record<string, unknown>,
+   options?: {
+     preserveReasonFormatting?: boolean;
++    interrupt?: boolean;
+   },
+ ): ToolExecutionResult {
+-  return createErrorResult(
++  const result = createErrorResult(
+     toolCall,
+     createCoreError(
+       CoreErrorType.PermissionDenied,
+@@ -114,4 +115,11 @@ export function createPermissionErrorResult(
+     undefined,
+     options,
+   );
++  // 熔断必须随拒绝结果送回运行时，才能先交付纠正指引，再停止当前轮。
++  return {
++    ...result,
++    ...(options?.interrupt ? {
++      turnControl: { stopTurnAfterResult: true as const, reason: "auto_review_circuit_breaker" },
++    } : {}),
++  };
+ }
+diff --git a/apps/zcode-cli/packages/core/src/tool/executor/hook-flow.ts b/apps/zcode-cli/packages/core/src/tool/executor/hook-flow.ts
+index d59a578..d3650c6 100644
+--- a/apps/zcode-cli/packages/core/src/tool/executor/hook-flow.ts
++++ b/apps/zcode-cli/packages/core/src/tool/executor/hook-flow.ts
+@@ -81,10 +81,12 @@ export async function runPermissionRequestHooks(
+     },
+   );
+   const decision = hookResult.permissionRequestResult;
++  if (decision?.behavior === "ask" && !hookResult.preventContinuation) return undefined;
+   if (hookResult.preventContinuation) {
+     return {
+       decision: "deny",
+       reason: hookResult.stopReason ?? "Denied by PermissionRequest hook",
++      interrupt: decision?.behavior === "deny" && decision.interrupt,
+     };
+   }
+   if (!decision) {
+@@ -105,8 +107,11 @@ export async function runPermissionRequestHooks(
+     return {
+       decision: "deny",
+       reason: decision.message ?? "Denied by PermissionRequest hook",
++      preserveReasonFormatting: true,
++      interrupt: decision.interrupt,
+     };
+   }
++  if (decision.behavior === "ask") return undefined;
+   const permissionUpdates = decision.permissionUpdates ?? decision.updatedPermissions;
+   return decision.updatedInput === undefined
+     ? {
+diff --git a/apps/zcode-cli/packages/core/src/tool/executor/permission-flow.ts b/apps/zcode-cli/packages/core/src/tool/executor/permission-flow.ts
+index 49ed540..8e4e846 100644
+--- a/apps/zcode-cli/packages/core/src/tool/executor/permission-flow.ts
++++ b/apps/zcode-cli/packages/core/src/tool/executor/permission-flow.ts
+@@ -325,9 +325,7 @@ export async function resolveToolPermission(
+           requestId,
+           ruleId: permissionDecision.ruleId,
+         },
+-        resolvedPermission.preserveReasonFormatting
+-          ? { preserveReasonFormatting: true }
+-          : undefined,
++        { preserveReasonFormatting: resolvedPermission.preserveReasonFormatting, interrupt: resolvedPermission.interrupt },
+       ),
+     };
+   }
+diff --git a/apps/zcode-cli/packages/core/src/tool/types.ts b/apps/zcode-cli/packages/core/src/tool/types.ts
+index 051a9c5..232c60d 100644
+--- a/apps/zcode-cli/packages/core/src/tool/types.ts
++++ b/apps/zcode-cli/packages/core/src/tool/types.ts
+@@ -438,7 +438,7 @@ export interface ToolExecutionFollowUpUserInput {
+ }
+ 
+ export interface ToolExecutionTurnControl {
+-  reason: "automation_create_limit" | "plan_exit_denied" | "subagent_terminal";
++  reason: "automation_create_limit" | "plan_exit_denied" | "subagent_terminal" | "auto_review_circuit_breaker";
+   stopTurnAfterResult: boolean;
+ }
+ 
+diff --git a/packages/desktop/src/main/desktopRuntimeEnv.ts b/packages/desktop/src/main/desktopRuntimeEnv.ts
+index e444d70..8501970 100644
+--- a/packages/desktop/src/main/desktopRuntimeEnv.ts
++++ b/packages/desktop/src/main/desktopRuntimeEnv.ts
+@@ -57,10 +57,14 @@ function isTruthyRuntimeEnvOverride(name: string): boolean {
+ 
+ // e2e 运行的是生产构建，默认会和本机正式版 ZCode 共用 app name / userData，
+ // 触发 Electron 单实例锁后只激活已有窗口，Chromedriver 无法接管测试进程。
+-// 这里允许测试显式隔离运行时身份，正常桌面/远控路径保持原来的默认值。
++// 适配发行默认使用既有的独立身份，直接运行 exe 也不会命中原版单实例锁；测试仍可显式覆盖。
+ export const runtimeApplicationName =
+   readRuntimeEnvOverride("ZCODE_DESKTOP_APPLICATION_NAME") ??
+-  (isLocalDevelopmentRuntime ? "ZCode Dev" : isPreviewPackagedRuntime ? "ZCode Preview" : "ZCode");
++  (isLocalDevelopmentRuntime
++    ? "ZCode Dev"
++    : isPreviewPackagedRuntime
++      ? "ZCode Preview"
++      : "ZCode AutoReview");
+ // Electron 的 app.getPath("home") 不一定跟随测试进程里的 HOME 覆盖。
+ // e2e 默认工作区依赖 home 路径，因此提供显式覆盖，避免测试写到开发者真实 ~/ZCodeProject。
+ export const runtimeHomePath = readRuntimeEnvOverride("ZCODE_DESKTOP_HOME_DIR");
+diff --git a/packages/ui/src/v4/ConversationComposer.tsx b/packages/ui/src/v4/ConversationComposer.tsx
+index 913ae0d..eb0f0ea 100644
+--- a/packages/ui/src/v4/ConversationComposer.tsx
++++ b/packages/ui/src/v4/ConversationComposer.tsx
+@@ -2142,6 +2142,9 @@ function ConversationComposerImpl({
+         <V4ComposerModeSwitch
+           workspacePath={workspacePath}
+           workspaceIdentity={workspaceIdentity}
++          remoteSessionId={remoteSessionId}
++          currentSessionBusy={canStop}
++          sessionId={sessionId}
+           provider={provider}
+           draftConfig={draftConfig}
+           disabled={disabled}
+diff --git a/packages/ui/src/v4/composer/V4ComposerModeControls.tsx b/packages/ui/src/v4/composer/V4ComposerModeControls.tsx
+index 0676cf3..e0c6a46 100644
+--- a/packages/ui/src/v4/composer/V4ComposerModeControls.tsx
++++ b/packages/ui/src/v4/composer/V4ComposerModeControls.tsx
+@@ -1,5 +1,5 @@
+ import { memo, useCallback, useMemo } from "react";
+-import { LightbulbIcon, XIcon, ChevronDownIcon } from "lucide-react";
++import { LightbulbIcon, XIcon, ChevronDownIcon, ShieldCheckIcon } from "lucide-react";
+ import {
+   TID_CHAT_MODE_SELECT_TRIGGER,
+   TID_CHAT_MODE_SELECT_ITEM,
+@@ -34,11 +34,20 @@ import {
+   useToolbarShortcutBindings,
+ } from "@/v4/composer/toolbarShortcuts.js";
+ import type { V4ComposerToolbarProps } from "@/v4/composer/V4ComposerToolbar.js";
++import {
++  CODEX_AUTO_APPROVAL_MODE,
++  useCodexAutoApprovalMode,
++} from "@/hooks/useCodexAutoApprovalMode.js";
+ 
+ function noop(): void {}
+ 
+-/** Plan 是独立勾选项，三种权限仍为单选；只编辑草稿，不向 Runtime 发切换命令。 */
++/** Plan 是独立约束；CodexAutoApproval 通过原生插件服务启停，原生权限仍由草稿 owner 管理。 */
+ function V4ComposerModeSwitchImpl({
++  workspacePath,
++  workspaceIdentity,
++  remoteSessionId,
++  currentSessionBusy,
++  sessionId,
+   provider,
+   draftConfig,
+   disabled,
+@@ -55,8 +64,19 @@ function V4ComposerModeSwitchImpl({
+   | "activeConfigPicker"
+   | "onConfigPickerOpenChange"
+   | "onSwitchMode"
+->) {
+-  const { intl } = useZCodeIntl();
++  | "sessionId"
++> & { remoteSessionId?: string; currentSessionBusy?: boolean }) {
++  const { intl, locale } = useZCodeIntl();
++  const approval = useCodexAutoApprovalMode({
++    workspacePath,
++    workspaceIdentity,
++    remoteSessionId,
++    currentSessionBusy,
++    sessionId,
++    mode: draftConfig?.mode ?? "build",
++    disabled,
++    onSwitchMode,
++  });
+   const displayProvider = provider ?? ZCODE_AGENT_PROVIDER;
+   const modeShortcutLabel = useShortcutCommandLabel("cycleSessionMode");
+   const modes = getZCodeAgentAvailableModes();
+@@ -74,20 +94,25 @@ function V4ComposerModeSwitchImpl({
+       name: "Mode",
+       category: "mode",
+       type: "select",
+-      currentValue: draftConfig?.mode ?? "build",
++      currentValue: approval.selectedValue,
+       options: getZCodeAgentAvailableModes()
+         .filter((mode) => mode.id !== "plan")
+-        .map((mode) => ({ value: mode.id, name: mode.name })),
++        .flatMap((mode) => [
++          { value: mode.id, name: mode.name },
++          ...(mode.id === "build" && approval.visible && !approval.enableRequiresNewSession
++            ? [{ value: CODEX_AUTO_APPROVAL_MODE, name: "CodexAutoApproval" }]
++            : []),
++        ]),
+     }),
+-    [draftConfig?.mode],
++    [approval.selectedValue, approval.visible, approval.enableRequiresNewSession],
+   );
+   const cycle = useCallback(() => {
+     const next = getNextConfigSelectValue(modeOption);
+-    if (next) onSwitchMode(next);
+-  }, [modeOption, onSwitchMode]);
++    if (next) void approval.select(next);
++  }, [modeOption, approval.select]);
+   useToolbarShortcutBindings({
+     hasAnyOption: Boolean(selected),
+-    toolbarDisabled: disabled,
++    toolbarDisabled: approval.blocked,
+     modelMenuDisabled: true,
+     modeOption,
+     onCycleSessionMode: cycle,
+@@ -95,12 +120,19 @@ function V4ComposerModeSwitchImpl({
+     onCycleThoughtLevel: noop,
+   });
+   if (!selected) return null;
+-  const Icon = resolveModeOptionIcon(selected.id);
++  const Icon =
++    approval.selectedValue === CODEX_AUTO_APPROVAL_MODE
++      ? ShieldCheckIcon
++      : resolveModeOptionIcon(selected.id);
++  const chinese = locale.startsWith("zh");
+   return (
+     <div className="flex min-w-0 items-center gap-1">
+       <DropdownMenu
+         open={activeConfigPicker === "mode"}
+-        onOpenChange={(open) => onConfigPickerOpenChange("mode", open)}
++        onOpenChange={(open) => {
++          onConfigPickerOpenChange("mode", open);
++          if (open) void approval.refresh();
++        }}
+       >
+         <ControlHintTooltip
+           title={intl.formatMessage({ id: "chat.toolbar.mode.label" })}
+@@ -122,7 +154,9 @@ function V4ComposerModeSwitchImpl({
+             >
+               <Icon className="size-4" />
+               <span className="inline group-data-[composer-compact=true]/mode:hidden">
+-                {label(selected)}
++                {approval.selectedValue === CODEX_AUTO_APPROVAL_MODE
++                  ? "CodexAutoApproval"
++                  : label(selected)}
+               </span>
+               <ChevronDownIcon className="size-3.5 group-data-[composer-compact=true]/mode:hidden" />
+             </Button>
+@@ -142,6 +176,7 @@ function V4ComposerModeSwitchImpl({
+         >
+           <DropdownMenuCheckboxItem
+             checked={draftConfig?.planEnabled ?? false}
++            disabled={approval.blocked}
+             onCheckedChange={(checked) => onSwitchMode(checked ? "plan" : "plan-off")}
+             data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, "plan")}
+             className="min-h-13 items-start gap-3 py-2"
+@@ -157,7 +192,32 @@ function V4ComposerModeSwitchImpl({
+             </span>
+           </DropdownMenuCheckboxItem>
+           <DropdownMenuSeparator />
+-          <DropdownMenuRadioGroup value={selected.id} onValueChange={onSwitchMode}>
++          <DropdownMenuRadioGroup
++            value={approval.selectedValue}
++            onValueChange={(value) => void approval.select(value)}
++          >
++            {approval.visible && (
++              <DropdownMenuRadioItem
++                value={CODEX_AUTO_APPROVAL_MODE}
++                disabled={approval.blocked || approval.enableRequiresNewSession}
++                data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, CODEX_AUTO_APPROVAL_MODE)}
++                className="min-h-13 items-start gap-3 py-2"
++              >
++                <ShieldCheckIcon className="mt-0.5 size-4.5 shrink-0" />
++                <span className="flex min-w-0 flex-col gap-0.5">
++                  <span>CodexAutoApproval</span>
++                  <span className="text-ui-sm text-foreground-subtle">
++                    {approval.enableRequiresNewSession
++                      ? chinese
++                        ? "请新建会话后启用；已有会话的插件目录已固定。"
++                        : "Start a new session to enable this plugin."
++                      : chinese
++                        ? "当前模型审查；启停适用于本工作区。失败转人工。"
++                        : "Review with the current model. Workspace setting; failures ask you."}
++                  </span>
++                </span>
++              </DropdownMenuRadioItem>
++            )}
+             {permissions.map((mode) => {
+               const ModeIcon = resolveModeOptionIcon(mode.id);
+               const descriptionId = getModeOptionDescriptionMessageId(displayProvider, {
+@@ -167,6 +227,7 @@ function V4ComposerModeSwitchImpl({
+                 <DropdownMenuRadioItem
+                   key={mode.id}
+                   value={mode.id}
++                  disabled={approval.blocked}
+                   data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, mode.id)}
+                   className="min-h-13 items-start gap-3 py-2"
+                 >
+@@ -183,6 +244,11 @@ function V4ComposerModeSwitchImpl({
+               );
+             })}
+           </DropdownMenuRadioGroup>
++          {approval.error && (
++            <div role="alert" className="px-2 py-1 text-ui-sm text-destructive">
++              {approval.error}
++            </div>
++          )}
+         </DropdownMenuContent>
+       </DropdownMenu>
+       {draftConfig?.planEnabled && (
+diff --git a/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts b/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts
+new file mode 100755
+index 0000000..f5d4424
+--- /dev/null
++++ b/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts
+@@ -0,0 +1,163 @@
++import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
++import { chmod, mkdtemp, rm } from "node:fs/promises";
++import { createServer, type Socket } from "node:net";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import type { ApprovalBridgeFactory, ApprovalBridgeOwner, ApprovalBridgePort, HookPluginContext, HookJSONOutput } from "@zcode/contracts";
++
++const MAX_FRAME = 2 * 1024 * 1024;
++const signature = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
++const ask = (message: string): HookJSONOutput => ({
++  hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "ask", message } },
++});
++const fault = (code: string, message: string) => Object.assign(new Error(message), { code });
++
++/** One private endpoint per foreground hook; no ambient environment credentials. */
++export function createNodeApprovalBridgeWithActivity(active: (plugin?: HookPluginContext) => boolean): ApprovalBridgeFactory {
++  return owner => createBridge(owner, active);
++}
++export const createNodeApprovalBridge: ApprovalBridgeFactory = owner => createBridge(owner, () => true);
++
++function createBridge(owner: ApprovalBridgeOwner, isActive: (plugin?: HookPluginContext) => boolean): ApprovalBridgePort {
++  const attempts = new Map<string, number>();
++  return {
++  async open(input, signal, plugin) {
++    input = structuredClone(input);
++    signal?.throwIfAborted();
++    const active = () => isActive(plugin);
++    if (!active()) throw fault("plugin_disabled", "Approval plugin is disabled or uninstalled");
++    let snapshot = structuredClone(owner.snapshot());
++    const directory = process.platform === "win32" ? undefined : await mkdtemp(join(tmpdir(), "zcode-review-"));
++    const address = directory ? join(directory, "bridge.sock") : `\\\\.\\pipe\\zcode-review-${randomUUID()}`;
++    const token = randomBytes(32).toString("hex");
++    const controller = new AbortController();
++    const liveSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
++    const deadline = Date.now() + 90000;
++    const timeout = setTimeout(() => controller.abort(fault("timeout", "Automatic review exceeded 90 seconds")), 90000);
++    const connections = new Set<Socket>();
++    let bindingId = signature({ input, snapshot, nonce: randomUUID() });
++    let finished = false, closed = false, busy = false;
++    const current = () => !liveSignal.aborted && active() && signature(snapshot) === signature(owner.snapshot());
++    const server = createServer(socket => {
++      connections.add(socket);
++      socket.once("close", () => connections.delete(socket));
++      socket.on("error", () => {});
++      socket.setEncoding("utf8");
++      let buffer = "", dispatched = false;
++      socket.on("data", chunk => {
++        buffer += chunk;
++        if (Buffer.byteLength(buffer) > MAX_FRAME) { socket.destroy(); return; }
++        if (dispatched || !buffer.includes("\n")) return;
++        dispatched = true;
++        void dispatch(buffer.slice(0, buffer.indexOf("\n"))).then(reply => {
++          if (!socket.destroyed) socket.end(JSON.stringify(reply) + "\n");
++        });
++      });
++    });
++    const close = async () => {
++      if (closed) return;
++      closed = true;
++      clearTimeout(timeout);
++      controller.abort(fault("cancelled", "Approval lease closed"));
++      liveSignal.removeEventListener("abort", onAbort);
++      for (const socket of connections) socket.destroy();
++      if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
++      if (directory) await rm(directory, { recursive: true, force: true });
++    };
++    const onAbort = () => { void close(); };
++    async function dispatch(text: string) {
++      let id: unknown;
++      try {
++        liveSignal.throwIfAborted();
++        if (!active()) throw fault("plugin_disabled", "Approval plugin is disabled or uninstalled");
++        if (finished) throw fault("closed", "Approval decision already consumed");
++        const request = JSON.parse(text) as { id?: unknown; token?: unknown; method?: string; params?: Record<string, unknown> };
++        id = request.id;
++        if (typeof request.token !== "string" || request.token.length !== token.length || !timingSafeEqual(Buffer.from(request.token), Buffer.from(token))) {
++          throw fault("authentication", "Invalid approval lease");
++        }
++        let result: unknown;
++        if (request.method === "context/read") {
++          if (busy) throw fault("busy", "A completion is already in progress");
++          snapshot = structuredClone(owner.snapshot());
++          bindingId = signature({ input, snapshot, nonce: randomUUID() });
++          const context = snapshot as Record<string, unknown>;
++          result = { ...context, sessionId: input.sessionId, turnId: input.turnId, requestId: input.requestId,
++            bindingId, deadline, action: { tool: input.toolName, arguments: input.toolInput,
++              fingerprint: signature(input.toolInput), permissionReason: input.reason, riskLevel: input.riskLevel,
++              mode: input.mode, toolCallId: input.toolCallId, sideEffectScope: input.sideEffectScope } };
++        } else if (request.method === "model/complete") {
++          if (!current() || request.params?.bindingId !== bindingId) throw fault("stale_context", "Approval model or authorization context changed");
++          if (busy) throw fault("busy", "Only one completion may run per approval");
++          const messages = request.params?.messages;
++          if (Array.isArray(messages) && messages.length === 2) {
++            const count = (attempts.get(input.requestId) ?? 0) + 1;
++            attempts.set(input.requestId, count);
++            if (attempts.size > 50) attempts.delete(attempts.keys().next().value!);
++            if (count > 3) throw fault("attempt_budget", "Automatic review exhausted its three attempts");
++          }
++          busy = true;
++          const completionController = new AbortController();
++          const completionSignal = AbortSignal.any([liveSignal, completionController.signal]);
++          const watch = setInterval(() => {
++            if (!active()) completionController.abort(fault("plugin_disabled", "Approval plugin is disabled or uninstalled"));
++            else if (!current()) completionController.abort(fault("stale_context", "Approval context changed during completion"));
++          }, 100);
++          try {
++            result = await completeWithCancellation(() => owner.complete(request.params, completionSignal), completionSignal);
++            completionSignal.throwIfAborted();
++            liveSignal.throwIfAborted();
++            if (!current()) throw fault("stale_context", "Approval context changed during completion");
++          } finally { clearInterval(watch); busy = false; }
++        } else throw fault("method", "Unknown approval bridge method");
++        if (Buffer.byteLength(JSON.stringify(result)) > MAX_FRAME) throw fault("input_budget", "Approval reply exceeds budget");
++        return { id, result };
++      } catch (error) {
++        const e = error as Error & { code?: string; retryable?: boolean };
++        return { id, error: { code: e.code ?? "model_error", message: e.message, retryable: e.retryable === true } };
++      }
++    }
++    try {
++      await new Promise<void>((resolve, reject) => {
++        server.once("error", reject);
++        server.listen(address, () => { server.removeListener("error", reject); resolve(); });
++      });
++      if (directory) await chmod(address, 0o600);
++      liveSignal.addEventListener("abort", onAbort, { once: true });
++      liveSignal.throwIfAborted();
++    } catch (error) { await close(); throw error; }
++    return {
++      env: { ZCODE_APPROVAL_BRIDGE_SOCKET: address, ZCODE_APPROVAL_BRIDGE_TOKEN: token, ZCODE_APPROVAL_BRIDGE_VERSION: "1" },
++      finish(output) {
++        if (finished || closed || liveSignal.aborted) return ask("Approval cancelled or expired");
++        const specific = output?.hookSpecificOutput;
++        if (specific?.hookEventName !== "PermissionRequest" || !specific.decision) return ask("Automatic review returned no decision");
++        const decision = specific.decision;
++        if (decision.behavior === "ask") return ask(decision.message ?? "Automatic review needs manual approval");
++        if (!current() || decision.bindingId !== bindingId) return ask("STALE_CONTEXT: approval snapshot expired");
++        const assessment = decision.assessment;
++        if (!assessment || assessment.outcome !== decision.behavior) return ask("Automatic review assessment is invalid");
++        finished = true;
++        const interrupt = owner.record(decision.behavior, assessment, input);
++        // Ignore plugin permission updates, modified arguments and interrupt flags.
++        return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: decision.behavior === "allow"
++          ? { behavior: "allow" }
++          : { behavior: "deny", interrupt, message: decision.message ?? assessment.rationale } } };
++      },
++      close,
++    };
++  },
++  };
++};
++
++async function completeWithCancellation(operation: () => Promise<unknown>, signal: AbortSignal): Promise<unknown> {
++  signal.throwIfAborted();
++  let rejectAbort: (reason?: unknown) => void = () => {};
++  const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = reject; });
++  const abort = () => rejectAbort(signal.reason);
++  signal.addEventListener("abort", abort, { once: true });
++  try {
++    if (signal.aborted) abort();
++    return await Promise.race([operation(), aborted]);
++  } finally { signal.removeEventListener("abort", abort); }
++}
+diff --git a/apps/zcode-cli/packages/adapters/src/exec/approval-plugin-activity.ts b/apps/zcode-cli/packages/adapters/src/exec/approval-plugin-activity.ts
+new file mode 100755
+index 0000000..57134be
+--- /dev/null
++++ b/apps/zcode-cli/packages/adapters/src/exec/approval-plugin-activity.ts
+@@ -0,0 +1,23 @@
++import { existsSync } from "node:fs";
++import type { ApprovalBridgeFactory } from "@zcode/contracts";
++import { loadFileConfig } from "../config/index.js";
++import { createNodeApprovalBridgeWithActivity } from "./approval-bridge.js";
++
++/** Read the same native config parser used by plugin enable/disable commands. */
++export function createConfiguredNodeApprovalBridge(configPaths: string[]): ApprovalBridgeFactory {
++  return createNodeApprovalBridgeWithActivity(plugin => {
++    if (!plugin) return true;
++    if (!existsSync(plugin.rootPath)) return false;
++    let enabled = true;
++    let pluginEnabled = true;
++    // 配置按 user → project 顺序合并；任一 false 都否决会错误阻断菜单写入的 workspace true。
++    for (const file of configPaths) {
++      if (!existsSync(file)) continue;
++      const loaded = loadFileConfig(file);
++      if (loaded.diagnostics.some(item => item.severity === "error")) return false;
++      enabled = loaded.config.plugins?.enabled ?? enabled;
++      pluginEnabled = loaded.config.plugins?.enabledPlugins?.[plugin.id] ?? pluginEnabled;
++    }
++    return enabled && pluginEnabled;
++  });
++}
+diff --git a/apps/zcode-cli/packages/contracts/src/hooks/approval-assessment.ts b/apps/zcode-cli/packages/contracts/src/hooks/approval-assessment.ts
+new file mode 100755
+index 0000000..803b19b
+--- /dev/null
++++ b/apps/zcode-cli/packages/contracts/src/hooks/approval-assessment.ts
+@@ -0,0 +1,15 @@
++import { z } from "zod";
++
++export const ApprovalAssessmentSchema = z.object({
++  outcome: z.enum(["allow", "deny"]),
++  risk_level: z.enum(["low", "medium", "high", "critical"]),
++  user_authorization: z.enum(["unknown", "low", "medium", "high"]),
++  rationale: z.string(),
++});
++
++export type ApprovalAssessment = z.infer<typeof ApprovalAssessmentSchema>;
++
++export const approvalBindingFields = {
++  bindingId: z.string().optional(),
++  assessment: ApprovalAssessmentSchema.optional(),
++};
+diff --git a/apps/zcode-cli/packages/contracts/src/interfaces/approval-bridge.port.ts b/apps/zcode-cli/packages/contracts/src/interfaces/approval-bridge.port.ts
+new file mode 100755
+index 0000000..fc36e2a
+--- /dev/null
++++ b/apps/zcode-cli/packages/contracts/src/interfaces/approval-bridge.port.ts
+@@ -0,0 +1,20 @@
++import type { HookJSONOutput, PermissionRequestHookInput, HookPluginContext } from "../hooks/index.js";
++
++/** Native credentials and model handles never cross this boundary. */
++export interface ApprovalBridgeOwner {
++  snapshot(): unknown;
++  complete(params: unknown, signal: AbortSignal): Promise<unknown>;
++  record(outcome: "allow" | "deny", assessment: unknown, input: PermissionRequestHookInput): boolean;
++}
++
++export interface ApprovalBridgeLease {
++  env: Record<string, string>;
++  finish(output: HookJSONOutput | undefined): HookJSONOutput;
++  close(): Promise<void>;
++}
++
++export interface ApprovalBridgePort {
++  open(input: PermissionRequestHookInput, signal?: AbortSignal, plugin?: HookPluginContext): Promise<ApprovalBridgeLease>;
++}
++
++export type ApprovalBridgeFactory = (owner: ApprovalBridgeOwner) => ApprovalBridgePort;
+diff --git a/apps/zcode-cli/packages/core/src/runtime/helpers/approval-bridge.ts b/apps/zcode-cli/packages/core/src/runtime/helpers/approval-bridge.ts
+new file mode 100755
+index 0000000..c634b3c
+--- /dev/null
++++ b/apps/zcode-cli/packages/core/src/runtime/helpers/approval-bridge.ts
+@@ -0,0 +1,90 @@
++import type { ApprovalBridgeFactory, ApprovalBridgePort, ModelInputMessage, ModelToolContract } from "@zcode/contracts";
++import { ModelRetryBudget } from "@zcode/contracts";
++import type { AgentRuntimeInternal } from "../internal.js";
++import { createTurnModel } from "../methods/turn-model.js";
++import { ProviderEntryOrigins } from "./provider-entry-origins.js";
++
++const REVIEW_MAX_OUTPUT_TOKENS = 8192;
++
++function visibleMessage(message: ModelInputMessage) {
++  return { role: message.role,
++    content: typeof message.content === "string" ? message.content : message.content.filter(block => block.type === "text"),
++    ...(message.toolCalls ? { tool_calls: message.toolCalls.map(call => ({ id: call.id,
++      type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } })) } : {}),
++    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}) };
++}
++
++/** Runtime owns denials; the adapter owns only short-lived transport leases. */
++export function createRuntimeApprovalBridge(runtime: AgentRuntimeInternal, factory: ApprovalBridgeFactory): ApprovalBridgePort {
++  let turnId: string | undefined;
++  let consecutive = 0;
++  let window: boolean[] = [];
++  let denials: unknown[] = [];
++  let interrupted = false;
++  const port = factory({
++    snapshot() {
++      const entries = runtime.messageHistory.borrowReadOnlyRuntimeEntries()
++        .filter(entry => entry.kind !== "attachment");
++      const messages = entries.map(entry => visibleMessage(entry.message));
++      const origins = new ProviderEntryOrigins();
++      const userMessages = entries.filter(entry => origins.hasRealUser(entry))
++        .map(entry => visibleMessage(entry.message).content);
++      const selection = runtime.getSessionModelSelection();
++      if (!selection) throw new Error("Select a desktop model before automatic review");
++      return { workspace: runtime.workingDirectory, modelSnapshot: selection,
++        branchGeneration: runtime.branchGeneration, mode: runtime.config.mode,
++        sessionId: runtime.sessionId, turnId, interrupted,
++        state: { userMessages, messages: messages.slice(-24), denials } };
++    },
++    async complete(params, signal) {
++      signal.throwIfAborted();
++      if (interrupted) throw new Error("Approval circuit breaker stopped this turn");
++      const request = params as { messages?: unknown[]; tools?: { name: string; description: string; parameters: unknown }[] };
++      if (!Array.isArray(request.messages) || JSON.stringify(request.messages).length > 180000) throw new Error("Approval input budget exceeded");
++      if (!Array.isArray(request.tools) || request.tools.length !== 2 || request.tools.some(tool => !["read_file", "list_files"].includes(tool.name))) {
++        throw new Error("Approval model may only investigate files and directories");
++      }
++      const messages: ModelInputMessage[] = request.messages.map(value => {
++        const message = value as { role: ModelInputMessage["role"]; content: string; tool_call_id?: string;
++          tool_calls?: { id: string; function: { name: string; arguments: string } }[] };
++        if (!["system", "user", "assistant", "tool"].includes(message.role) || typeof message.content !== "string") throw new Error("Invalid review message");
++        return { role: message.role, content: message.content,
++          ...(message.tool_call_id ? { toolCallId: message.tool_call_id } : {}),
++          ...(message.tool_calls ? { toolCalls: message.tool_calls.map(call => {
++            if (!["read_file", "list_files"].includes(call.function.name)) throw new Error("Invalid investigation tool");
++            return { id: call.id, name: call.function.name, input: JSON.parse(call.function.arguments) };
++          }) } : {}) };
++      });
++      const tools: ModelToolContract[] = request.tools.map(tool => ({
++        name: tool.name, description: tool.description, inputSchema: tool.parameters as ModelToolContract["inputSchema"],
++        readOnly: true, destructive: false,
++      }));
++      const model = createTurnModel(runtime, { retryBudget: ModelRetryBudget.SingleAttempt });
++      // 原生工厂只绑定会话推理档位；输出预算必须逐次提供，否则在请求发送前即被校验拒绝。
++      const result = await model.generateText({ messages, tools, abortSignal: signal,
++        options: { maxOutputTokens: Math.min(REVIEW_MAX_OUTPUT_TOKENS, model.optionSpecs.maxOutputTokens.max) } });
++      // Main-model and reviewer hidden reasoning never cross the approval bridge.
++      return { role: "assistant", content: result.text,
++        ...(result.toolCalls?.length ? { tool_calls: result.toolCalls.map(call => ({ id: call.id,
++          type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } })) } : {}) };
++    },
++    record(outcome, assessment, input) {
++      const denied = outcome === "deny";
++      window = [...window, denied].slice(-50);
++      consecutive = denied ? consecutive + 1 : 0;
++      if (denied) denials = [...denials, { assessment, turnId: input.turnId,
++        toolCallId: input.toolCallId, action: { tool: input.toolName, arguments: input.toolInput } }].slice(-50);
++      interrupted ||= consecutive >= 3 || window.filter(Boolean).length >= 10;
++      return interrupted;
++    },
++  });
++  return {
++    open(input, signal, plugin) {
++      if (turnId !== input.turnId) {
++        turnId = input.turnId;
++        consecutive = 0; window = []; interrupted = false;
++      }
++      return port.open(input, signal, plugin);
++    },
++  };
++}
+diff --git a/docs/specs/codex-auto-approval.md b/docs/specs/codex-auto-approval.md
+new file mode 100755
+index 0000000..58630da
+--- /dev/null
++++ b/docs/specs/codex-auto-approval.md
+@@ -0,0 +1,148 @@
++# Codex automatic approval plugin bridge
++
++The local desktop installation is 3.14.4. This patch is based on source commit
++29628c9acdb81b703bbd4080c207a0e7ce5e276e (3.14.3). The independent desktop
++distribution retains the installed Electron executable and native assets, and
++replaces the Agent and desktop JavaScript with source-built bundles. This mixed patch-level compatibility must be
++tested and identified in the artifact metadata.
++
++## Ownership and flow
++
++```mermaid
++sequenceDiagram
++  participant R as Session runtime
++  participant H as Configured permission hook
++  participant P as Plugin process
++  participant M as Native model adapter
++  R->>H: PermissionRequest with exact tool input
++  H->>R: Obtain approval lease and authoritative context
++  H->>P: stdin + event-scoped bridge socket/token
++  P->>H: context/read
++  P->>H: model/complete with reviewer messages and read tool schemas
++  H->>M: Bound current model, credentials remain in host
++  M-->>P: Normalized text/tool calls
++  P-->>H: allow / deny / ask + assessment
++  H->>R: Validate lease, update per-turn denial state
++  R->>R: Execute once, return denial feedback, or prompt human
++```
++
++The runtime owns authoritative human input, session rejection action history, and per-turn counters.
++The configured hook owns its transient lease; the execution adapter owns socket
++I/O. A bridge exists only for the enabled `codex-auto-approval` plugin's foreground
++PermissionRequest process. No alternate model, provider, tools, shell, execution,
++or credential retrieval capability is exposed. Standard permission checking runs
++before and after hooks; hard denies and plan restrictions retain precedence.
++
++## Contract
++
++Bridge version 1 uses bounded NDJSON requests `{ id, token, method, params }` and
++responses `{ id, result }` or `{ id, error: { code, message, retryable } }`.
++`context/read` returns binding, complete action, current model selection, trusted
++human input records, limited visible evidence, previous denials, and deadline.
++`model/complete` accepts reviewer messages and the fixed `read_file/list_files`
++schemas and returns the existing Reviewer completion shape. Native model
++credentials are not returned. Every request is checked against the active lease.
++
++`ZCODE_APPROVAL_BRIDGE_SOCKET` and `ZCODE_APPROVAL_BRIDGE_TOKEN` are ephemeral
++child-process environment overlays. They are minted by the adapter, never
++accepted from inherited environment or project configuration, and never persisted
++or sent to the model. Windows uses named pipes; other platforms use private Unix
++sockets. `ZCODE_APPROVAL_BRIDGE_VERSION=1` advertises this contract. Missing bridge,
++invalid input, missing authoritative context, and transport failures request
++human approval, never allow.
++
++PermissionRequest gains `behavior: ask` and optional `assessment` and `bindingId`
++fields. Ask dominates automatic allow; deny dominates ask. A deny with
++`interrupt: true` stops the turn after delivering the denial tool result.
++Only a validated Codex plugin result contributes to per-turn counters.
++
++Cancellation ends the lease and native model request. Model selection, workspace,
++branch or human authorization changes invalidate the result. Stale results ask
++for a new review. An allow grants only the current unchanged tool call and never
++updates permission rules. On turn change denial counters reset; rejected actions remain in history. Policy
++denials trip at 3 consecutive or 10 among the last 50 reviews; technical errors
++are not policy denials. Plugin toggles take effect in new sessions.
++
++## Acceptance
++
++The assessment schema is shared in the contracts hook module. Permission error
++assembly owns the optional breaker turn-control result, so the permission flow
++does not duplicate error envelopes or exceed the existing module size boundary.
++
++The approval sidecar uses `ModelRetryBudget.SingleAttempt` for each native completion.
++The shared reviewer owns the outer three-attempt budget, including snapshot restarts;
++the adapter also counts initial attempts by request id. This prevents the native default
++eleven-attempt retry policy from multiplying the approval budget. Native authentication
++and runtime header refresh remain in the host.
++
++The reviewer supplies an explicit per-request output budget: at most 8192 tokens,
++clamped to the current native model's advertised maximum. Native ModelFactory
++deliberately binds only the selected reasoning level; omitting an output budget
++fails before transport. Review must preserve that bound reasoning level. Tests
++use the real native Model request validator, not only a permissive model mock.
++
++Cover real hook subprocess allow/deny/ask/cancel, malformed responses, wrong-token
++and stale leases, parallel sessions, model switching with inherited options,
++read-only investigation, policy feedback, turn-scoped breaker, hard permission
++rules, offline artifact installation, disable/uninstall and desktop startup.
++Keep the original independent CLI and its 52 tests compatible. Record actual
++checks and unverified remote-workspace support without claiming complete Codex
++equivalence. No database migration, public publication or global auth change.
++
++## CodexAutoApproval permission entry
++
++The local Windows permission menu adds a fourth radio option named exactly
++`CodexAutoApproval`; the marketplace listing has the same display name. The
++stable lowercase technical plugin id remains
++`codex-auto-approval@codex-auto-review-local` for upgrade compatibility.
++No new Agent permission enum or unimplemented `auto` mode is introduced.
++
++The native plugin configuration owns enabled state. The existing plugin service
++and plugin management store own mutations and projection; the composer owns
++only its native permission draft. Selecting CodexAutoApproval first enables the
++plugin at workspace scope, waits for the successful native RPC/list refresh,
++then selects native `build`. Selecting any native permission first disables the
++plugin at workspace scope, then changes the native permission draft. Plan is an
++independent constraint and does not toggle the plugin. A previously enabled
++plugin aligns the idle composer with build. Workspace overrides take precedence
++over the user default; other workspaces retain their own effective settings.
++
++```mermaid
++sequenceDiagram
++  participant U as Permission menu
++  participant S as Plugin management store
++  participant H as Native plugin service/config
++  participant C as Composer draft owner
++  U->>S: Select option, workspace-scoped enabled command
++  S->>H: plugins/setEnabled
++  H-->>S: Persisted plugin result + refreshed effective listing
++  S-->>U: Success for the same workspace context
++  U->>C: build or selected native permission
++```
++
++Switching is locked while a workspace task is running or a toggle is pending.
++On RPC failure the existing store restores the projection, displays the error,
++and no native permission change is admitted. A stale workspace response cannot
++change the new workspace draft. Opening the menu refreshes the effective plugin
++state. The entry is hidden for non-Windows, browser and remote workspaces, and
++when this plugin is not installed. Keyboard cycling follows the same command
++path. Installed/enabled at user scope remains a default for new sessions;
++plugin enable is admitted only from a new-session composer. An existing session
++that has no enabled plugin cannot hot-load its frozen Hook catalog; its option
++is disabled with a new-session explanation. Disable remains available for idle
++existing sessions, and the activity bridge cancels/restores native approval.
++The bridge activity check merges user then project enable flags with the same
++last-defined precedence as native config; workspace enable can override user
++disable and must not be rejected by an independent any-false check.
++
++Desktop acceptance must verify four distinct radio entries, exact display name
++in the plugin settings, keyboard enable, native-mode disable with persisted
++workspace config, Plan independence, restored automatic review, original denial
++and failure behavior, and uninstall restoring native approval. Repack only an
++independent desktop copy; preserve the original installation and active app.
++
++The adapted production desktop uses `ZCode AutoReview` as its default runtime
++application identity. This preserves the existing adapted userData directory,
++avoids the official app's single-instance lock, and makes `ZCode.exe` directly
++launchable without a cmd environment wrapper. Development and Preview defaults,
++explicit test overrides and shared native user plugin settings stay unchanged.
+diff --git a/packages/ui/src/hooks/useCodexAutoApprovalMode.ts b/packages/ui/src/hooks/useCodexAutoApprovalMode.ts
+new file mode 100755
+index 0000000..48ab636
+--- /dev/null
++++ b/packages/ui/src/hooks/useCodexAutoApprovalMode.ts
+@@ -0,0 +1,107 @@
++import { useCallback, useEffect, useRef } from "react";
++import { isRemoteWorkspaceIdentity } from "@zcode/shared";
++import { usePlatform } from "@/hooks/usePlatform.js";
++import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
++import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
++import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
++import { getVisibleTaskMetas, getWorkspaceState } from "@/store/zcodeSessionStoreSelectors.js";
++
++export const CODEX_AUTO_APPROVAL_MODE = "codex-auto-approval";
++const PLUGIN_ID = "codex-auto-approval@codex-auto-review-local";
++const RUNNING_STATUSES = new Set(["creating", "restoring", "streaming"]);
++
++export function useCodexAutoApprovalMode(params: {
++  workspacePath: string;
++  workspaceIdentity?: string;
++  remoteSessionId?: string;
++  currentSessionBusy?: boolean;
++  sessionId: string | null;
++  mode: string;
++  disabled: boolean;
++  onSwitchMode: (mode: string) => void;
++}) {
++  const platform = usePlatform();
++  const service = useBaseWorkspaceServices().pluginManagementService;
++  const identity = params.workspaceIdentity?.trim() || null;
++  const supported = Boolean(
++    params.workspacePath &&
++    service &&
++    typeof platform.executeDesktopCommand === "function" &&
++    /Windows/i.test(navigator.userAgent) &&
++    !params.remoteSessionId &&
++    !(identity && isRemoteWorkspaceIdentity(identity)),
++  );
++  const state = usePluginManagementStore();
++  const sameContext =
++    state.workspacePath === params.workspacePath &&
++    state.workspaceIdentity === identity &&
++    state.configScope === null;
++  const plugin = sameContext ? state.plugins.find((item) => item.id === PLUGIN_ID) : undefined;
++  const enableRequiresNewSession = Boolean(params.sessionId && !plugin?.enabled);
++  const workspaceBusy = useZCodeSessionStore((sessions) => {
++    const workspace = getWorkspaceState(sessions, params.workspacePath, identity ?? undefined);
++    return (
++      Object.values(workspace.taskRuntimeByTaskId ?? {}).some(
++        (runtime) => RUNNING_STATUSES.has(runtime.status) || Boolean(runtime.activeInputId?.trim()),
++      ) || getVisibleTaskMetas(workspace).some((task) => task.status === "running")
++    );
++  });
++  const blocked =
++    params.disabled ||
++    Boolean(params.currentSessionBusy) ||
++    workspaceBusy ||
++    Boolean(state.togglingPluginId || state.operationId) ||
++    (supported && (!sameContext || state.loading));
++  const activeContext = useRef("");
++  activeContext.current = `${params.workspacePath}\0${identity ?? ""}`;
++  const initializedContext = useRef("");
++  const refresh = useCallback(async () => {
++    if (!supported || !service) return;
++    await usePluginManagementStore.getState().initialize({
++      workspacePath: params.workspacePath,
++      ...(identity ? { workspaceIdentity: identity } : {}),
++      pluginService: service,
++    });
++  }, [identity, params.workspacePath, service, supported]);
++  useEffect(() => {
++    if (!supported || initializedContext.current === activeContext.current) return;
++    initializedContext.current = activeContext.current;
++    void refresh();
++  }, [refresh, supported]);
++  useEffect(() => {
++    // 用户级启用是新会话的默认值。先对齐正常 build 权限，避免菜单显示原生编辑却仍运行审查。
++    if (supported && plugin?.enabled && !blocked && params.mode !== "build") {
++      params.onSwitchMode("build");
++    }
++  }, [blocked, params.mode, params.onSwitchMode, plugin?.enabled, supported]);
++
++  const select = useCallback(
++    async (value: string) => {
++      if (blocked) return;
++      if (!supported || !plugin) {
++        if (value !== CODEX_AUTO_APPROVAL_MODE) params.onSwitchMode(value);
++        return;
++      }
++      const context = activeContext.current;
++      const enabled = value === CODEX_AUTO_APPROVAL_MODE;
++      if (enabled && enableRequiresNewSession) return;
++      const success = await usePluginManagementStore
++        .getState()
++        .setEnabled(PLUGIN_ID, enabled, service, "workspace");
++      // 启停 RPC 完成时可能已切换工作区；旧请求不得再写入新草稿。
++      if (!success || activeContext.current !== context) return;
++      params.onSwitchMode(enabled ? "build" : value);
++    },
++    [blocked, enableRequiresNewSession, params.onSwitchMode, plugin, service, supported],
++  );
++
++  return {
++    visible: supported && Boolean(plugin),
++    selectedValue: supported && plugin?.enabled ? CODEX_AUTO_APPROVAL_MODE : params.mode,
++    blocked,
++    enableRequiresNewSession,
++    select,
++    refresh,
++    error: sameContext && state.lastFailedPluginId === PLUGIN_ID ? state.error : null,
++  };
++}

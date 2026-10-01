@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PermissionRequest": [{ "matcher": "*", "hooks": [{
+      "type": "process",
+      "command": "${ZCODE_PLUGIN_ROOT}/runtime/node.exe",
+      "args": ["${ZCODE_PLUGIN_ROOT}/bin/permission-request.js"],
+      "timeoutMs": 95000
+    }] }]
+  }
+}

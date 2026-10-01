@@ -1,0 +1,14 @@
+CodexAutoApproval for ZCode
+Includes approval policy and approval lifecycle semantics derived from OpenAI Codex.
+Copyright 2025 OpenAI. Licensed under Apache License 2.0; see LICENSE.
+Source revision: d42056091aded7feb1d88ac7e83972108b2aa478.
+Modified for standalone zcode runtime; no Codex runtime dependency.
+
+The host-adapter patch modifies ZCode source from zai-org/ZCode.
+ZCode source revision: 29628c9acdb81b703bbd4080c207a0e7ce5e276e.
+The upstream ZCode source is licensed under Apache License 2.0.
+This is an independent third-party adaptation, not an official OpenAI or ZCode release.
+
+Bundled third-party executables and libraries retain their own licenses.
+Node.js license: plugins/codex-auto-approval/runtime/LICENSE-node.txt.
+The Windows desktop distribution also includes Electron/Chromium license notices.

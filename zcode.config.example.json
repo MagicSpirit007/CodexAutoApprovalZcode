@@ -1,0 +1,31 @@
+{
+  "model": {
+    "model": "YOUR_MODEL_ID",
+    "baseUrl": "https://api.openai.com/v1",
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "wireApi": "chat",
+    "timeoutMs": 120000,
+    "maxAttempts": 3,
+    "maxOutputTokens": 8192
+  },
+  "approval": {
+    "reviewer": "auto_review",
+    "model": null,
+    "timeoutMs": 90000,
+    "maxAttempts": 3,
+    "inputMaxChars": 180000,
+    "maxInvestigationCalls": 12,
+    "consecutiveDenialLimit": 3,
+    "rollingDenialLimit": 10,
+    "rollingWindow": 50,
+    "extraPolicy": ""
+  },
+  "runtime": {
+    "maxTurns": 0,
+    "maxRuntimeMs": 0,
+    "contextMaxChars": 160000,
+    "keepRecentMessages": 16,
+    "shellTimeoutMs": 120000,
+    "maxToolOutputChars": 16000
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "codex-auto-review-local",
+  "owner": { "name": "CodexAutoReview" },
+  "plugins": [{ "name": "codex-auto-approval", "displayName": "CodexAutoApproval", "source": "./plugins/codex-auto-approval", "description": "CodexAutoApproval: approval review using the current desktop session model. Requires the host approval bridge.", "version": "0.1.1" }]
+}

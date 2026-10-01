@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-01",
+  "source": "clean public staging checkout",
+  "coreLinux": {
+    "node": "24.14.0",
+    "tests": 52,
+    "passed": 52
+  },
+  "coreWindows": {
+    "node": "22.19.0",
+    "tests": 52,
+    "passed": 52
+  },
+  "javascriptSyntax": "passed",
+  "relativeMarkdownLinks": "passed",
+  "marketplaceManifestAndRuntime": "passed",
+  "secretScanner": {
+    "tool": "gitleaks",
+    "version": "8.30.1",
+    "mode": "directory, redacted output",
+    "findings": 0
+  },
+  "notes": [
+    "Host and GUI evidence is from the preceding fixed-source acceptance; no external provider claims.",
+    "Private user configurations and raw session logs are excluded."
+  ]
+}

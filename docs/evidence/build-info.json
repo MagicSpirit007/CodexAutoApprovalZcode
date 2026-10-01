@@ -1,0 +1,22 @@
+{
+  "distribution": "CodexAutoApproval-local-portable-host-adapter",
+  "pluginVersion": "0.1.1",
+  "electronAssetSourceVersion": "3.14.4",
+  "desktopSourceVersion": "3.14.3",
+  "agentSourceVersion": "3.14.3",
+  "upstreamCommit": "29628c9acdb81b703bbd4080c207a0e7ce5e276e",
+  "codexCommit": "d42056091aded7feb1d88ac7e83972108b2aa478",
+  "bridgeProtocol": 1,
+  "applicationIdentity": "ZCode AutoReview",
+  "permissionOption": "CodexAutoApproval",
+  "originalAgentSha256": "fad4c35c4c36ec210d8a06d3fa0e77de23c8545e2eb6ff90aea1eb38d1e6275f",
+  "adaptedAgentSha256": "47016979f82a8cb6b7f390bb12fa275cf162fb44538972e4d797bfbb0bd0df31",
+  "originalDesktopAsarSha256": "172d6f333e61642ce3882250949fafe8180f75b5b8e5552244ca2c59ca05d14e",
+  "adaptedDesktopAsarSha256": "a3b6a7d9daec3a87499c570ec161b5c2deebfdc80eed7996b00c7436a0e09cde",
+  "changes": [
+    "Approval bridge and current-model adapter",
+    "PermissionRequest ask/interrupt",
+    "CodexAutoApproval permission radio option using native workspace plugin settings",
+    "Direct exe startup with independent application identity"
+  ]
+}

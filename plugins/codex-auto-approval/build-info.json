@@ -1,0 +1,8 @@
+{
+  "pluginVersion": "0.1.1",
+  "bridgeProtocol": 1,
+  "codexCommit": "d42056091aded7feb1d88ac7e83972108b2aa478",
+  "hostCommit": "29628c9acdb81b703bbd4080c207a0e7ce5e276e",
+  "desktopVersion": "3.14.4",
+  "agentSourceVersion": "3.14.3"
+}

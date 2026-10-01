@@ -1,0 +1,29 @@
+{
+  "name": "zcode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone coding agent with Codex-derived automatic approval review",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "zcode": "bin/zcode.js"
+  },
+  "scripts": {
+    "start": "node bin/zcode.js",
+    "test": "node --test test/approval.test.js test/cli.test.js test/model.test.js test/runtime.test.js",
+    "test:desktop": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/desktop.test.js test/host-chain.test.js",
+    "package:desktop": "node scripts/package-desktop.mjs",
+    "check": "node scripts/check.js"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MagicSpirit007/CodexAutoApprovalZcode.git"
+  },
+  "homepage": "https://github.com/MagicSpirit007/CodexAutoApprovalZcode#readme",
+  "bugs": {
+    "url": "https://github.com/MagicSpirit007/CodexAutoApprovalZcode/issues"
+  }
+}

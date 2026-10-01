@@ -37,6 +37,8 @@ with tempfile.TemporaryDirectory(prefix="zcode-clean-patch-") as temporary:
         target.write_bytes(git(HOST, "show", f"HEAD:{file}"))
     subprocess.run(["git", "apply", "--check", str(patch)], cwd=clean, check=True)
     subprocess.run(["git", "apply", str(patch)], cwd=clean, check=True)
+    produced = {file.relative_to(clean).as_posix() for file in clean.rglob("*") if file.is_file()}
+    assert produced == set(tracked + added), "Patch contains unexpected generated or missing files"
     for file in tracked + added:
         assert normalize((clean / file).read_bytes()) == normalize((HOST / file).read_bytes()), file
 (OUT / "patch-validation.json").write_text(json.dumps({

@@ -1,0 +1,17 @@
+{
+  "windows": true,
+  "keyAvailable": true,
+  "officialDeepseekFlash": true,
+  "highReasoning": true,
+  "allow": true,
+  "deny": true,
+  "readOnlyContinuation": true,
+  "readToolSucceeded": true,
+  "hiddenStateRestored": true,
+  "crossReviewIsolated": true,
+  "mainSelectionUnchanged": true,
+  "truthfulAutoReview": true,
+  "temporaryConfigurationCleared": true,
+  "completed": true,
+  "transportOrProviderFailure": false
+}

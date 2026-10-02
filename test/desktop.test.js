@@ -136,3 +136,21 @@ test('bridge deadline cancels a provider that ignores cancellation without appro
   f.controller.abort();
   assert.equal(f.records.length, 0);
 });
+
+
+test('bridge v2 mismatch falls back without issuing a native model request', async t => {
+  const f=await fixture(t);
+  const result=await reviewDesktopPermission(hook,{env:{...f.env,ZCODE_APPROVAL_BRIDGE_VERSION:'1'}});
+  assert.equal(decision(result).behavior,'ask');
+  assert.equal(decision(result).reviewFailure.code,'bridge_unavailable');
+});
+test('sanitized diagnostics retain safe HTTP/business/retry details and strip secrets in every field', async t => {
+  const f=await fixture(t,async()=>{throw Object.assign(new Error('sk-HIDDEN_BARE https://provider.example/?key=PRIVATE\nunsafe stack'),{
+    name:'ProviderBusinessError',providerCode:'1309',statusCode:401,providerRequestId:'safe-request',retryAfterMs:200000,
+    responseBodySummary:{secret:'RAW_BODY'},responseHeaders:{'authorization':'Bearer PRIVATE'},retryable:false });});
+  const result=await child(f.env);
+  const failure=decision(result).reviewFailure;
+  assert.equal(failure.businessCode,'1309');assert.equal(failure.httpStatus,401);assert.equal(failure.requestId,'safe-request');
+  assert.equal(failure.retryAfterMs,90000);assert.equal(failure.retryable,false);
+  assert.doesNotMatch(JSON.stringify(failure),/HIDDEN_BARE|PRIVATE|RAW_BODY|provider.example|unsafe stack/);
+});

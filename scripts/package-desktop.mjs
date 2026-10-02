@@ -16,7 +16,7 @@ if (windowsNode) {
 }
 const manifest = JSON.parse(await readFile(resolve(plugin, '.zcode-plugin/plugin.json'), 'utf8'));
 await writeFile(resolve(plugin, 'build-info.json'), JSON.stringify({
-  pluginVersion: manifest.version, bridgeProtocol: 1,
+  pluginVersion: manifest.version, bridgeProtocol: 2,
   codexCommit: 'd42056091aded7feb1d88ac7e83972108b2aa478',
   hostCommit: '29628c9acdb81b703bbd4080c207a0e7ce5e276e',
   desktopVersion: '3.14.4', agentSourceVersion: '3.14.3',

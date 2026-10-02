@@ -1,0 +1,16 @@
+{
+  "deepseekAutoApproval": "passed",
+  "glmMainWithDeepseekReview": "unverified_native_account_unavailable",
+  "sameAccountGLMReview": "unverified_native_account_unavailable",
+  "glmInterceptionCleared": "unverified",
+  "ordinaryAndReviewModelRequestsIssued": false,
+  "sameAccountReferenceMatched": true,
+  "nativeAccountAvailability": "unknown",
+  "nativeAccountKeyCachePresent": false,
+  "readOnlyCustomerInfoHttpStatus": 200,
+  "readOnlyCustomerInfoUsableData": false,
+  "newAccountApiKeyCreated": false,
+  "temporaryProfilesRemoved": true,
+  "diagnosticScriptSha256": "36bc5da72a72f0f560539bfdedb2999ea1ed80bcb3a392c437de6f4bea7e70bc",
+  "diagnosticFixtureSha256": "81893c9c3e8fec6bce6d060ab4dd72d22aaec88365948984c8d99949be254482"
+}

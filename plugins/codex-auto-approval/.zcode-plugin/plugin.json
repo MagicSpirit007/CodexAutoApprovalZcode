@@ -1,7 +1,9 @@
 {
   "name": "codex-auto-approval",
-  "version": "0.1.1",
-  "description": "CodexAutoApproval: review desktop PermissionRequest actions using the current session model. Requires the host approval bridge.",
-  "author": { "name": "CodexAutoReview" },
+  "version": "0.1.3",
+  "description": "CodexAutoApproval: review desktop PermissionRequest actions using a native inherited or independently selected model. Requires the host approval bridge.",
+  "author": {
+    "name": "CodexAutoReview"
+  },
   "license": "Apache-2.0"
 }

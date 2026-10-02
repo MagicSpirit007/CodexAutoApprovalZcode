@@ -9,8 +9,8 @@ const root = resolve(process.argv[3] ?? resolve(dirname(fileURLToPath(import.met
 const upstream = resolve(root, 'host-adapter/upstream');
 if (!process.argv[2]) throw new Error('Provide the original ZCode 3.14.4 Windows installation directory.');
 const original = resolve(process.argv[2]);
-const output = resolve(root, 'artifacts/CodexAutoApproval-Windows');
-const staging = resolve(root, 'artifacts/acceptance/asar-staging');
+const output = resolve(process.argv[4] ?? resolve(root, 'artifacts/0.1.3/CodexAutoApproval-Windows'));
+const staging = resolve(root, 'artifacts/0.1.3/acceptance/asar-staging');
 const digest = async file => createHash('sha256').update(await readFile(file)).digest('hex');
 await mkdir(staging, { recursive: true });
 console.log('Extracting original desktop archive');
@@ -41,17 +41,18 @@ const metadata = {
   distribution: 'CodexAutoApproval-local-portable-host-adapter', pluginVersion: version,
   electronAssetSourceVersion: '3.14.4', desktopSourceVersion: '3.14.3', agentSourceVersion: '3.14.3',
   upstreamCommit: '29628c9acdb81b703bbd4080c207a0e7ce5e276e',
-  codexCommit: 'd42056091aded7feb1d88ac7e83972108b2aa478', bridgeProtocol: 1,
+  codexCommit: 'd42056091aded7feb1d88ac7e83972108b2aa478', bridgeProtocol: 2,
   applicationIdentity: 'ZCode AutoReview', permissionOption: 'CodexAutoApproval',
   originalAgentSha256: await digest(resolve(original, 'resources/glm/zcode.cjs')),
   adaptedAgentSha256: await digest(agent), originalDesktopAsarSha256: await digest(resolve(original, 'resources/app.asar')),
   adaptedDesktopAsarSha256: await digest(resolve(output, 'resources/app.asar')),
-  changes: ['Approval bridge and current-model adapter', 'PermissionRequest ask/interrupt',
+  changes: ['Bridge v2 with independently configured native review model and private tool continuation', 'PermissionRequest ask/interrupt',
     'CodexAutoApproval permission radio option using native workspace plugin settings', 'Direct exe startup with independent application identity'],
 };
 await writeFile(resolve(output, 'AUTO-REVIEW-BUILD.json'), JSON.stringify(metadata, null, 2) + '\n');
 await writeFile(resolve(output, 'README-CodexAutoApproval.txt'),
   'Run ZCode.exe directly. Install CodexAutoApproval from the supplied marketplace, then open a new local workspace session.\r\n' +
+  'Configure follow-session or a specified review model in native plugin settings. Provider settings own credentials.\r\n' +
   'Select CodexAutoApproval in the permission menu. Native modes disable the plugin for this workspace. Plan remains an independent restriction.\r\n' +
   'Electron/native assets from installed 3.14.4; patched desktop and Agent source 3.14.3. See AUTO-REVIEW-BUILD.json.\r\n' +
   'This independent distribution does not replace the official installation. Source and installation instructions: https://github.com/MagicSpirit007/CodexAutoApprovalZcode\r\n');

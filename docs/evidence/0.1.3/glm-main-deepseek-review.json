@@ -1,0 +1,59 @@
+{
+  "ordinaryGLMCompleted": false,
+  "reviewCompleted": false,
+  "setupOrRuntimeFailure": true,
+  "failureStep": "native_glm_unavailable",
+  "ordinaryRequestAttempted": false,
+  "reviewActionAttempted": false,
+  "modelSelectionFacts": {
+    "glmChoiceCount": 0,
+    "triggerIncludesTarget": false,
+    "nativeGLMReferenceFound": true,
+    "nativeGLMReferenceEnabled": true,
+    "credentialsRekeyed": true,
+    "sameNativeAccountSelectionMatched": true,
+    "compatibleCatalogReferenceFound": true,
+    "compatibleCatalogRevision": 30,
+    "nativeAuthentication": {
+      "readOnlyAuthenticationProbe": true,
+      "customerInfoAttempted": true,
+      "customerInfoSucceeded": false,
+      "accountLocationPresent": false,
+      "existingKeyListAttempted": false,
+      "existingNamedApiKeyPresent": false,
+      "nativeOAuthTokenPresent": true,
+      "customerInfoHttpStatus": 200
+    },
+    "selectedIsGLM": false,
+    "selectedIsDeepSeek": true,
+    "nativeModelItemCount": 0,
+    "nativeProviderTriggerCount": 0,
+    "glmProviderDOMPresent": false,
+    "noConnectedAccount": false,
+    "nativeRadioItemCount": 0,
+    "nativeRadioItemCountAfterSubmenu": 0,
+    "nativeModelItemCountAfterSubmenu": 0,
+    "nativeProvider": {
+      "snapshotAvailable": true,
+      "providerPresent": true,
+      "providerExecutable": false,
+      "providerEnabled": true,
+      "providerIssueCount": 0,
+      "availability": "unknown",
+      "entitled": false,
+      "current": true,
+      "unavailableReason": "unknown",
+      "targetModelPresent": true,
+      "targetModelExecutable": false,
+      "targetModelSelectable": false,
+      "targetModelEnabled": true,
+      "targetModelIssueCount": 0
+    }
+  },
+  "failure": {
+    "code": "ERR_ASSERTION",
+    "message": "Isolated acceptance failed during native_glm_unavailable",
+    "retryable": false
+  },
+  "temporaryProfileRemoved": true
+}

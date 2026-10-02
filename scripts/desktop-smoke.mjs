@@ -5,10 +5,10 @@ import { createRequire } from 'node:module';
 
 if (process.platform !== 'win32') throw new Error('Run with Windows Node');
 const root = path.resolve('.');
-const output = path.join(root, 'artifacts/acceptance/windows');
+const output = path.join(root, 'artifacts/0.1.3/acceptance/windows');
 await mkdir(output, { recursive: true });
 const profile = path.join(output, 'profile');
-const app = spawn(path.join(root, 'artifacts/ZCode-AutoReview-Windows/ZCode.exe'), ['--remote-debugging-port=9337'], {
+const app = spawn(path.join(root, 'artifacts/0.1.3/CodexAutoApproval-Windows/ZCode.exe'), ['--remote-debugging-port=9337'], {
   env: { ...process.env, ZCODE_DESKTOP_APPLICATION_NAME: 'ZCode AutoReview Acceptance',
     ZCODE_DESKTOP_USER_DATA_DIR: path.join(profile, 'appdata'), ZCODE_DESKTOP_HOME_DIR: profile,
     ZCODE_DATA_BASE_DIR: profile }, stdio: ['ignore', 'pipe', 'pipe'],
@@ -51,7 +51,7 @@ try {
   const text = await page.locator('body').innerText();
   await page.screenshot({ path: path.join(output, 'desktop-launch.png') });
   await writeFile(path.join(output, 'desktop-smoke.json'), JSON.stringify({ pid: app.pid, title: await page.title(), url: page.url(),
-    bodyText: text.slice(0, 15000), pageErrors, adapterBuild: JSON.parse(await (await import('node:fs/promises')).readFile(path.join(root, 'artifacts/ZCode-AutoReview-Windows/AUTO-REVIEW-BUILD.json'), 'utf8')) }, null, 2));
+    bodyText: text.slice(0, 15000), pageErrors, adapterBuild: JSON.parse(await (await import('node:fs/promises')).readFile(path.join(root, 'artifacts/0.1.3/CodexAutoApproval-Windows/AUTO-REVIEW-BUILD.json'), 'utf8')) }, null, 2));
   console.log(JSON.stringify({ launched: true, pid: app.pid, title: await page.title(), visibleText: text.slice(0, 1500) }));
 } finally {
   await browser?.close();

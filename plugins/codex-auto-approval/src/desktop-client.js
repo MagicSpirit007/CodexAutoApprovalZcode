@@ -6,7 +6,7 @@ export class DesktopBridgeClient {
   constructor(env = process.env) {
     this.socket = env.ZCODE_APPROVAL_BRIDGE_SOCKET;
     this.token = env.ZCODE_APPROVAL_BRIDGE_TOKEN;
-    if (env.ZCODE_APPROVAL_BRIDGE_VERSION !== '1' || !this.socket || !this.token) {
+    if (env.ZCODE_APPROVAL_BRIDGE_VERSION !== '2' || !this.socket || !this.token) {
       throw new ModelError('This desktop has no compatible approval bridge', { code: 'bridge_unavailable' });
     }
   }
@@ -40,7 +40,7 @@ export class DesktopBridgeClient {
         try {
           const reply = JSON.parse(buffer.slice(0, buffer.indexOf('\n')));
           if (reply.id !== id) throw new Error('Mismatched bridge response');
-          if (reply.error) return finish(new ModelError(reply.error.message, { code: reply.error.code, retryable: reply.error.retryable === true }));
+          if (reply.error) return finish(new ModelError(reply.error.message, reply.error));
           finish(null, reply.result);
         } catch { finish(new ModelError('Invalid desktop bridge reply', { code: 'bridge_protocol' })); }
       });
@@ -54,7 +54,7 @@ export class DesktopModelClient {
     this.bridge = bridge;
     this.context = context;
     this.budget = budget;
-    this.config = { model: context.modelSnapshot.modelId };
+    this.config = { model: (context.actualReviewSelection ?? context.modelSnapshot).modelId };
   }
   complete(messages, { tools, deadline, signal }) {
     if (messages.length === 2 && ++this.budget.attempts > 3) {

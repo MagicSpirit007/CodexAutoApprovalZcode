@@ -11,19 +11,21 @@
 | 默认风险策略 | 与 Codex 一致 | 策略正文保留；只增加来源注释、统一换行 | `codex/codex-rs/prompts/templates/guardian/policy.md` → `prompts/policy.md`；`policy-comparison.json` |
 | 授权评分、证据信任、放行阈值 | 宿主适配 | 保留规则；用户授权来源与执行环境改为 ZCode 原生会话记录 | `prompts/review-template.md`、`src/reviewer.js`；CLI 和宿主授权测试 |
 | 评估解析与 deny 纠正指引 | 与 Codex 一致 | allow/deny、风险、授权、理由；拒绝返回理由与禁止绕过指引 | `codex/codex-rs/ext/guardian-reviewer/src/assessment.rs`、`codex/codex-rs/prompts/src/model_messages/guardian.rs` → `src/reviewer.js`；解析及原生拒绝测试 |
-| 当前会话模型与推理设置 | 宿主适配 | 用 ZCode 原生模型适配器，继承模型选择、认证、接口和推理选项；凭据不进入插件。与 Codex 专用审批模型路线不同 | `host/core/src/runtime/helpers/approval-bridge.ts`、`runtime/methods/turn-model.ts`；切换模型、选项继承测试 |
+| 独立审查模型与推理设置 | 宿主适配 | 旧配置继承会话；可经原生插件配置单独指定模型引用与推理档位，workspace 覆盖 user；由原生适配器调用，不改主模型、不换供应商，凭据不进入插件；真实会话/query/TraceContext 与 auto_review 归属保留 | `host/core/src/runtime/helpers/approval-bridge.ts`、`runtime/methods/turn-model.ts`；请求归属、切换模型、选项继承测试 |
 | 桌面审批入口 | 宿主适配 | 只处理正常权限流程实际要求审批的 PermissionRequest；明确禁止、Plan 限制、工具校验仍先行 | `host/core/src/hooks/configured-runner-callback.ts`、`tool/executor/permission-flow.ts`；Plan、禁止规则、执行次数测试 |
-| 独立权限选项与显示名称 | 宿主适配 | CodexAutoApproval 单选项通过原生插件服务写入 workspace 启停设置；保留原生权限和 Plan；无需新增 auto 枚举 | `host-adapter/upstream/packages/ui/src/hooks/useCodexAutoApprovalMode.ts`、`v4/composer/V4ComposerModeControls.tsx`、`marketplace.json`；七项桌面 E2E、菜单与插件列表截图 |
+| 独立权限选项与显示名称 | 宿主适配 | CodexAutoApproval 单选项通过原生插件服务写入 workspace 启停设置；保留原生权限和 Plan；无需新增 auto 枚举 | `host-adapter/upstream/packages/ui/src/hooks/useCodexAutoApprovalMode.ts`、`v4/composer/V4ComposerModeControls.tsx`、`marketplace.json`；八项桌面 E2E、菜单与插件列表截图 |
 | allow 作用范围 | 与 Codex 一致 | 仅放行当前动作；丢弃权限规则更新和修改参数，不缓存许可 | `host/adapters/src/exec/approval-bridge.ts`；一次性消费与执行一次测试 |
 | deny 与主模型反馈 | 与 Codex 一致 | 动作不执行；工具结果含具体理由及纠正指引，可继续其他已授权工作 | `host/core/src/tool/executor/hook-flow.ts`；原生拒绝链路测试 |
-| 技术失败与人工回退 | 宿主适配 | 认证、网络、无效输出、预算、桥故障归为 ask，回到宿主人工审批；Codex 部分故障采用 fail-closed | `src/desktop-hook.js`、`host/core/src/hooks/output.ts`；技术故障、无桥回退测试 |
-| 取消与过期答复 | 宿主适配 | 取消停止模型及 Hook；会话、轮次、调用、完整参数、模型与授权快照绑定，旧结果失效后重审 | `host/adapters/src/exec/approval-bridge.ts`；取消、并行会话、过期授权和模型变化测试 |
+| 审查进度及审批顺序 | 宿主适配 | 仅已加载且启用的插件能力审查优先；运行时保存开始/完成事件，桌面与回放展示进度，allow/deny 不发布人工请求 | `host/core/src/tool/executor/permission-review-flow.ts`、`bootstrap/src/zcode-protocol-v4/product-projection-permission-review.ts`；实际 Hook 链路及回放测试 |
+| 技术失败与人工回退 | 宿主适配 | 认证、网络、流式错误、缺失结束、无效输出、预算和桥故障归为 ask；先登记应答，再发布带脱敏 code/message 及可选业务码、HTTP 状态、请求编号与重试信息的人工请求。Codex 部分故障采用 fail-closed | `src/desktop-hook.js`、`host/bootstrap/src/zcode-protocol/interaction-response-race.ts`；技术故障、首次点击、重复应答、无桥回退测试 |
+| 取消与过期答复 | 宿主适配 | 取消停止模型及 Hook；会话、轮次、调用、完整参数、主会话模型、实际审查模型、配置版本与授权快照绑定，旧结果失效后重审 | `host/adapters/src/exec/approval-bridge.ts`；取消、并行会话、过期授权和模型变化测试 |
 | 总时限与重试 | 宿主适配 | 默认总时限 90 秒，最多三次审查尝试；只读调查可继续同一审查，受调查步数和总时限限制。原生模型内层使用 SingleAttempt，避免叠加重试 | `src/reviewer.js`、`src/desktop-client.js`、`host/adapters/src/model/retry-budget.ts`；预算与超时测试 |
 | 标准拒绝熔断 | 与 Codex 一致 | 每个宿主轮次连续三拒，或最近五十次审查累计十拒，停止当前轮并保留会话；新轮重置计数，拒绝动作记录保留 | `host/core/src/runtime/helpers/approval-bridge.ts`、`tool/executor/permission-flow.ts`；三连拒、窗口计数、下一轮恢复测试 |
 | Cyber 单拒熔断与 Codex 专用流程 | 未支持 | 首版只实现标准熔断；未移植 Cyber 专用模式、Codex 专用授权 UI 和 reviewer 服务 | 固定范围；不宣称等价 |
+| 私有多轮续接上下文 | 宿主适配 | 宿主按 binding / attempt 保存思考内容及供应商元数据，只用于同一审查的原生后续调用；visible prefix 校验防混用，重试／取消／失效／完成清理，不进入插件、主模型、界面或完整模型轨迹 | `host/core/src/runtime/helpers/approval-continuation.ts`；原生多轮隔离与真实 DeepSeek 文件调查 |
 | 审批模型调查工具 | 宿主适配 | 只开放工作区文件读取、目录调查；无 shell、写入和网络工具。工具集合小于 Codex | `src/tools.js`、`host/core/src/runtime/helpers/approval-bridge.ts`；边界读取与拒绝写工具测试 |
 | 独立安装、停用、卸载 | 宿主适配 | 标准 manifest、hooks、相对路径 marketplace；随包 Node、代码、策略，安装后无需源码目录；停用、卸载恢复原生审批 | `plugins/codex-auto-approval/`；原生 marketplace 干净安装及发现测试 |
-| 真实外部提供商 | 未实测 | 桌面验收使用本机 HTTP 模型替身；外部账户认证、计费、各提供商返回格式仍需实际任务验证 | 验收说明列出已执行场景与范围 |
+| 真实外部提供商 | 分路径验收 | 官方 DeepSeek Flash / High、GLM 主会话配合 DeepSeek 审查及 GLM 自身审查分别记录；本机替身、人工点击与其他供应商成功不证明 GLM 解除拦截 | [0.1.3 验收报告](desktop-acceptance.md)；0.1.2 历史证据保留 |
 | SSH、WSL、远程工作区 | 未实测 | 首版交付范围为本地 Windows 桌面；不自动同步插件到远端 | 固定范围 |
 | Codex OS 沙箱、网络代理、全部工具 | 未支持 | 使用 ZCode 宿主权限与工具边界；模型审批不提供 OS 隔离 | 固定范围 |
 

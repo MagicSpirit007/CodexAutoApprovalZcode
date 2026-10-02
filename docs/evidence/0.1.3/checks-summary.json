@@ -1,0 +1,175 @@
+{
+  "version": "0.1.3",
+  "runtimeFrozen": true,
+  "checks": [
+    {
+      "id": "root-typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "exitCode": 0,
+      "logPath": "logs/root-final-typecheck.log"
+    },
+    {
+      "id": "root-lint",
+      "command": "pnpm lint",
+      "status": "passed_with_warnings",
+      "exitCode": 0,
+      "logPath": "logs/root-final-lint.log",
+      "warnings": 70,
+      "errors": 0
+    },
+    {
+      "id": "cli-pnpm-typecheck",
+      "command": "pnpm --dir apps/zcode-cli typecheck",
+      "status": "environment_failure",
+      "exitCode": 1,
+      "logPath": "logs/cli-pnpm-original-typecheck.log",
+      "reason": "Workspace turbo executable Permission denied; equivalent Node invocation executed"
+    },
+    {
+      "id": "cli-pnpm-lint",
+      "command": "pnpm --dir apps/zcode-cli lint",
+      "status": "environment_failure",
+      "exitCode": 1,
+      "logPath": "logs/cli-pnpm-original-lint.log",
+      "reason": "Workspace turbo executable Permission denied; equivalent Node invocation executed"
+    },
+    {
+      "id": "cli-equivalent-typecheck",
+      "command": "node ../../node_modules/turbo/bin/turbo run typecheck",
+      "status": "passed",
+      "exitCode": 0,
+      "logPath": "logs/cli-final-typecheck.log",
+      "successfulTasks": 27,
+      "totalTasks": 27,
+      "cachedTasks": 9
+    },
+    {
+      "id": "cli-equivalent-lint",
+      "command": "node ../../node_modules/turbo/bin/turbo run lint",
+      "status": "failed_existing_diagnostics",
+      "exitCode": 1,
+      "logPath": "logs/cli-final-lint.log",
+      "reportedErrors": 6,
+      "reportedWarnings": 2,
+      "successfulTasks": 7,
+      "totalScheduledTasks": 14,
+      "limitation": "Turbo stops after debug/telemetry failure; 6 reported errors are not an exhaustive full-workspace error count. CLI reported 2 errors. Changed source files were separately checked against HEAD and preserved local 0.1.2."
+    },
+    {
+      "id": "architecture",
+      "command": "node scripts/architecture/architecture-check.mjs check --changed",
+      "status": "passed",
+      "exitCode": 0,
+      "logPath": "logs/architecture-final.log",
+      "violations": 0,
+      "baselineViolations": 0,
+      "newViolations": 0
+    },
+    {
+      "id": "native-build",
+      "command": "pnpm --filter @zcode/contracts --filter @zcode/core --filter @zcode/adapters --filter @zcode/bootstrap build",
+      "status": "passed",
+      "exitCode": 0,
+      "logPath": "logs/native-final-build.log",
+      "packages": 4
+    },
+    {
+      "id": "agent-build",
+      "command": "pnpm --filter @zcode/cli build:desktop-agent",
+      "status": "passed",
+      "exitCode": 0,
+      "logPath": "logs/agent-final-build.log"
+    },
+    {
+      "id": "desktop-full-build",
+      "command": "pnpm build:no-runtime-assets",
+      "status": "passed",
+      "exitCode": 0,
+      "logPath": "logs/desktop-full-build.log",
+      "note": "Builds desktop main/host/preload and renderer. Final UI label adjustment was then rebuilt by renderer-only command below."
+    },
+    {
+      "id": "desktop-final-renderer-build",
+      "command": "pnpm exec vite build",
+      "status": "passed",
+      "exitCode": 0,
+      "logPath": "logs/desktop-final-renderer-build.log"
+    },
+    {
+      "id": "native-selection-tests",
+      "command": "node --import tsx/dist/loader.mjs apps/zcode-cli/packages/bootstrap/test/approval-review-selection.test.ts",
+      "status": "passed",
+      "exitCode": 0,
+      "logPath": "logs/native-selection-tests.log",
+      "tests": 1,
+      "passed": 1,
+      "nativeSources": [
+        "ProviderRegistryService",
+        "ProviderConfigResolver",
+        "ProviderRegistry"
+      ],
+      "coverage": [
+        "missing API key",
+        "deleted provider",
+        "deleted model",
+        "unsupported reasoning",
+        "valid specified selection"
+      ]
+    },
+    {
+      "id": "plugin-option-tests",
+      "command": "node --import tsx/dist/loader.mjs apps/zcode-cli/packages/bootstrap/test/review-model-options.test.ts",
+      "status": "passed",
+      "exitCode": 0,
+      "logPath": "logs/plugin-options-tests.log",
+      "tests": 3,
+      "passed": 3
+    },
+    {
+      "id": "final-authorization-tests",
+      "command": "node --test --test-name-pattern=... artifacts/0.1.3/acceptance/host-chain.bundle.mjs",
+      "status": "passed",
+      "exitCode": 0,
+      "logPath": "logs/linux-final-auth-regressions.log",
+      "tests": 6,
+      "passed": 6
+    }
+  ],
+  "changedSourceLint": {
+    "current": {
+      "files": 71,
+      "warnings": 7,
+      "errors": 12
+    },
+    "headBaseline": {
+      "files": 54,
+      "warnings": 6,
+      "errors": 12
+    },
+    "preserved012Baseline": {
+      "files": 64,
+      "warnings": 11,
+      "errors": 12
+    },
+    "genuinelyNewFiles": {
+      "files": 7,
+      "warnings": 0,
+      "errors": 0
+    },
+    "allUntrackedFiles": {
+      "files": 17,
+      "warnings": 0,
+      "errors": 0
+    },
+    "newErrorKeysComparedToHead": [],
+    "newErrorKeysComparedToPreserved012": [],
+    "detailsPath": "lint-comparison.json",
+    "preserved012Patch": "preexisting/host-0.1.2.patch",
+    "note": "12 existing max-lines diagnostics; exit-code equality alone was not used to infer baseline equivalence."
+  },
+  "liveAcceptanceOwner": "Root agent; separate Windows/core/bridge/protocol/90-second/DeepSeek/GLM/GUI receipts provide actual model results.",
+  "buildNodeVersion": "v24.14.0 (Linux build toolchain)",
+  "linuxNativeTestNodeVersion": "v24.14.0",
+  "windowsAcceptanceVersionSource": "See tested-artifacts.json and Windows receipts (parent verified Windows Node v22.19.0)"
+}

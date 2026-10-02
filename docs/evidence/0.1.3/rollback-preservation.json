@@ -1,0 +1,25 @@
+{
+  "files": [
+    {
+      "name": "ACCEPTANCE.md",
+      "unchanged": true
+    },
+    {
+      "name": "CodexAutoApproval-Windows-0.1.2.zip",
+      "unchanged": true
+    },
+    {
+      "name": "CodexAutoApproval-plugin-0.1.2.zip",
+      "unchanged": true
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "unchanged": true
+    },
+    {
+      "name": "zcode-29628c9-auto-review.patch",
+      "unchanged": true
+    }
+  ],
+  "allUnchanged": true
+}

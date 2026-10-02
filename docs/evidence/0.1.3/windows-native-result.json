@@ -1,0 +1,16 @@
+{
+  "platform": "Windows",
+  "bridgeTests": 17,
+  "protocolAndPrivacyTests": 5,
+  "hostTests": 39,
+  "regularPass": 60,
+  "regularFail": 0,
+  "regularSkip": 1,
+  "realDeadlinePass": 1,
+  "realDeadlineFail": 0,
+  "realDeadlineDurationMs": 91930.392,
+  "allDistinctRequiredTestsPassed": 61,
+  "bundlesHashManifest": "bundle-SHA256SUMS.txt",
+  "regularLog": "logs/windows-native-tests.log",
+  "deadlineLog": "logs/windows-90-second-deadline.log"
+}

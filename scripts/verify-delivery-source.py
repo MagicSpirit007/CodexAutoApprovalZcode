@@ -8,7 +8,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 HOST = ROOT / "host-adapter/upstream"
 CODEX = ROOT.parent / "codex"
-OUT = ROOT / "artifacts/acceptance"
+OUT = ROOT / "artifacts/0.1.3/acceptance"
 OUT.mkdir(parents=True, exist_ok=True)
 def git(cwd, *args):
     return subprocess.check_output(["git", *args], cwd=cwd)

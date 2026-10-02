@@ -1,0 +1,14 @@
+{
+  "javascript": {
+    "command": "Node 24.14.0 scripts/check.js",
+    "status": "passed",
+    "exitCode": 0
+  },
+  "python": {
+    "command": "python3 -m py_compile scripts/build-release.py scripts/verify-delivery-source.py",
+    "status": "passed",
+    "exitCode": 0
+  },
+  "finalGLMDiagnosticScriptSha256": "36bc5da72a72f0f560539bfdedb2999ea1ed80bcb3a392c437de6f4bea7e70bc",
+  "finalDesktopFixtureBundleSha256": "81893c9c3e8fec6bce6d060ab4dd72d22aaec88365948984c8d99949be254482"
+}

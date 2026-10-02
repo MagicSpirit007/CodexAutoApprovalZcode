@@ -1,3 +1,54 @@
+diff --git a/apps/zcode-cli/packages/adapters/src/config/file-config.adapter.ts b/apps/zcode-cli/packages/adapters/src/config/file-config.adapter.ts
+index c2fc2cf..a0a5c58 100644
+--- a/apps/zcode-cli/packages/adapters/src/config/file-config.adapter.ts
++++ b/apps/zcode-cli/packages/adapters/src/config/file-config.adapter.ts
+@@ -46,7 +46,7 @@ export interface PluginEnabledPatchResult {
+ 
+ export interface PluginOptionsPatchResult {
+   clearedOptionKeys: string[];
+-  options: Record<string, string | number | boolean>;
++  options: import("@zcode/contracts").PluginOptionValues;
+   path: string;
+   pluginId: string;
+ }
+@@ -298,7 +298,7 @@ export async function enablePluginsByDefaultInFileConfig(
+ export async function updatePluginOptionsInFileConfig(
+   filePath: string,
+   pluginId: string,
+-  options: Record<string, string | number | boolean>,
++  options: import("@zcode/contracts").PluginOptionValues,
+   clearOptionKeys: string[] = [],
+ ): Promise<PluginOptionsPatchResult> {
+   const resolvedPath = resolvePath(filePath);
+@@ -523,7 +523,7 @@ function patchPluginEnabled(
+ function patchPluginOptions(
+   parsed: Record<string, unknown>,
+   pluginId: string,
+-  options: Record<string, string | number | boolean>,
++  options: import("@zcode/contracts").PluginOptionValues,
+   clearOptionKeys: string[],
+ ): Record<string, unknown> {
+   const plugins = isRecord(parsed.plugins) ? parsed.plugins : {};
+diff --git a/apps/zcode-cli/packages/adapters/src/config/schema.ts b/apps/zcode-cli/packages/adapters/src/config/schema.ts
+index 4bc74cc..c284d17 100644
+--- a/apps/zcode-cli/packages/adapters/src/config/schema.ts
++++ b/apps/zcode-cli/packages/adapters/src/config/schema.ts
+@@ -112,7 +112,14 @@ const mcpSchema = z.object({
+   servers: z.record(z.string(), mcpServerSchema).optional(),
+ });
+ 
+-const pluginOptionValueSchema = z.union([z.string(), z.number(), z.boolean()]);
++// Contracts currently use Zod 3; the file parser uses Zod 4, so keep this boundary executable locally.
++const reviewModelSelectionSchema = z.discriminatedUnion("mode", [
++  z.object({ mode: z.literal("inherit") }).strict(),
++  z.object({ mode: z.literal("specified"), providerId: z.string().trim().min(1).max(200),
++    modelId: z.string().trim().min(1).max(200),
++    options: z.object({ reasoningLevel: z.string().trim().min(1).max(80) }).strict().optional() }).strict(),
++]);
++const pluginOptionValueSchema = z.union([z.string(), z.number(), z.boolean(), reviewModelSelectionSchema]);
+ 
+ const pluginMarketplaceSourceSchema = z.discriminatedUnion("source", [
+   z
 diff --git a/apps/zcode-cli/packages/adapters/src/exec/index.ts b/apps/zcode-cli/packages/adapters/src/exec/index.ts
 index 49db04f..3d53444 100644
 --- a/apps/zcode-cli/packages/adapters/src/exec/index.ts
@@ -35,11 +86,118 @@ index 42de6d4..d32d3a0 100644
 +  if (budget === ModelRetryBudget.SingleAttempt) return 1;
    return isUnboundedRetryBudget(budget) ? UNBOUNDED_RETRY_MAX_ATTEMPTS : maxAttempts;
  }
+diff --git a/apps/zcode-cli/packages/adapters/src/model/runner-debug.ts b/apps/zcode-cli/packages/adapters/src/model/runner-debug.ts
+index 00ba813..399665c 100644
+--- a/apps/zcode-cli/packages/adapters/src/model/runner-debug.ts
++++ b/apps/zcode-cli/packages/adapters/src/model/runner-debug.ts
+@@ -88,7 +88,8 @@ export function recordGenerateTextDebug(input: {
+   result?: AiSdkGenerateTextResult;
+   startedAt: number;
+ }): void {
+-  if (!input.recordModelIO) {
++  // 自动审查续接包含私有思考；即使打开完整轨迹也不得进入可由主会话/UI读取的 model-io。
++  if (!input.recordModelIO || input.request.metadata?.querySource === "auto_review") {
+     return;
+   }
+ 
+@@ -186,7 +187,8 @@ export async function recordStreamTextDebug(input: {
+   result?: AiSdkStreamTextResult;
+   startedAt: number;
+ }): Promise<void> {
+-  if (!input.recordModelIO) {
++  // 同步禁止流式路径写入私有思考和 provider 正文。
++  if (!input.recordModelIO || input.request.metadata?.querySource === "auto_review") {
+     return;
+   }
+ 
+diff --git a/apps/zcode-cli/packages/adapters/src/model/runner-normalization.ts b/apps/zcode-cli/packages/adapters/src/model/runner-normalization.ts
+index 9d90122..d3c23ec 100644
+--- a/apps/zcode-cli/packages/adapters/src/model/runner-normalization.ts
++++ b/apps/zcode-cli/packages/adapters/src/model/runner-normalization.ts
+@@ -144,6 +144,7 @@ export function toModelStreamEvent(chunk: TextStreamPart<ToolSet>): ModelStreamE
+           // Final tool-call 的 name/input 由 assembler 统一校验和归一化。
+           name: chunk.toolName,
+           providerExecuted: chunk.providerExecuted,
++          providerOptions: isRecord(chunk.providerMetadata) ? chunk.providerMetadata : undefined,
+           // 执行参数只取 AI SDK final tool-call，避免从展示用 delta 猜测输入，
+           // 也避免 stream/model-io 多次解析并重复告警。
+           input: chunk.input,
+@@ -186,10 +187,12 @@ export function normalizeToolCalls(
+       input?: unknown;
+       args?: unknown;
+       providerExecuted?: boolean;
++      providerMetadata?: unknown;
+     };
+     const id = value.toolCallId ?? value.id ?? crypto.randomUUID();
+     const name = normalizeModelToolName(value.toolName ?? value.name, {
+       providerExecuted: value.providerExecuted,
++      providerOptions: isRecord(value.providerMetadata) ? value.providerMetadata : undefined,
+       source: "generateText",
+       toolCallId: id,
+       toolCallIndex: index,
+diff --git a/apps/zcode-cli/packages/adapters/src/model/transform.ts b/apps/zcode-cli/packages/adapters/src/model/transform.ts
+index 18c6afe..d799a1a 100644
+--- a/apps/zcode-cli/packages/adapters/src/model/transform.ts
++++ b/apps/zcode-cli/packages/adapters/src/model/transform.ts
+@@ -88,6 +88,7 @@ export function toAiSdkMessages(
+       case "assistant": {
+         transformedMessages.push({
+           role: "assistant",
++          ...(message.providerOptions ? { providerOptions: message.providerOptions as AiSdkProviderOptions } : {}),
+           content: toAiSdkAssistantContent(message.content, message.toolCalls, {
+             ...options,
+             stripOpenAiResponsesStoredReasoning: shouldStripOpenAiResponsesStoredReasoning,
+@@ -272,6 +273,7 @@ function toAiSdkAssistantContent(
+         toolCallId: toolCall.id,
+         toolName: projectToolNameForProvider(toolCall.name, options),
+         input: toolCall.input,
++        ...(toolCall.providerOptions ? { providerOptions: toolCall.providerOptions as AiSdkProviderOptions } : {}),
+       }),
+     ) ?? [];
+ 
+@@ -295,7 +297,8 @@ function contentBlockToAiSdkAssistantParts(
+ ): AiSdkAssistantContentPart[] {
+   switch (block.type) {
+     case "text":
+-      return block.text.length > 0 ? [{ type: "text", text: block.text }] : [];
++      return block.text.length > 0 ? [{ type: "text", text: block.text,
++        ...(block.providerOptions ? { providerOptions: block.providerOptions as AiSdkProviderOptions } : {}) }] : [];
+ 
+     case "reasoning": {
+       if (
+diff --git a/apps/zcode-cli/packages/adapters/src/plugins/index.ts b/apps/zcode-cli/packages/adapters/src/plugins/index.ts
+index 8d86c28..4de65c9 100644
+--- a/apps/zcode-cli/packages/adapters/src/plugins/index.ts
++++ b/apps/zcode-cli/packages/adapters/src/plugins/index.ts
+@@ -294,7 +294,7 @@ function createPluginMetadata(
+   dataPath: string,
+   enabled: boolean,
+   declaredMcpServerNames: string[],
+-  configuredOptions: Record<string, string | number | boolean>,
++  configuredOptions: import("@zcode/contracts").PluginOptionValues,
+ ): PluginMetadata {
+   // manifest 的 author/homepage 作为详情页信息区的回退来源（商店 listing 优先）。
+   const author = normalizeAuthorValue(loaded.manifest.author);
+@@ -341,7 +341,7 @@ function resolveEnabledComponents(input: {
+   hookEvents: Partial<Record<HookEventName, HookMatcherConfig[]>>;
+   loaded: LoadedPlugin;
+   mcpServerDefinitions: Record<string, unknown>;
+-  options: Record<string, string | number | boolean>;
++  options: import("@zcode/contracts").PluginOptionValues;
+   priority: number;
+   workingDirectory: string;
+ }): PluginComponents {
 diff --git a/apps/zcode-cli/packages/bootstrap/src/app/create-app.ts b/apps/zcode-cli/packages/bootstrap/src/app/create-app.ts
-index feab6b9..35886b1 100644
+index feab6b9..17ccf32 100644
 --- a/apps/zcode-cli/packages/bootstrap/src/app/create-app.ts
 +++ b/apps/zcode-cli/packages/bootstrap/src/app/create-app.ts
-@@ -6,6 +6,7 @@ import {
+@@ -1,4 +1,5 @@
+ import { isAbsolute, join, resolve } from "node:path";
++import { validateApprovalReviewSelection } from "./approval-review-selection.js";
+ import {
+   createInMemorySessionEventStore,
+   createNodeToolArtifactStore,
+@@ -6,6 +7,7 @@ import {
  import { createNodeLoggerFactory } from "@zcode/adapters/logging";
  import { createConfig, resolvePath } from "@zcode/adapters/config";
  import {
@@ -47,51 +205,303 @@ index feab6b9..35886b1 100644
    createNodeExecutionAdapter,
    resolveEffectiveBashShellSelection,
  } from "@zcode/adapters/exec";
-@@ -762,6 +763,9 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
+@@ -762,6 +764,10 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
        eventSink: options.eventSink,
        modelFactory,
        modelIoDir,
 +      approvalBridgeFactory: createConfiguredNodeApprovalBridge([
 +        configResult.sources.user.path, ...configResult.sources.project.paths,
-+      ]),
++      ], { configurationVersion: () => options.providerRegistry!.getView().revision,
++        validateSelection: selection => validateApprovalReviewSelection(options.providerRegistry!, selection) }),
        providerRuntimeHeadersPort: options.providerRuntimeHeadersPort,
        resolveEffectiveModelSelection: options.resolveEffectiveModelSelection,
        isRemoteWorkspace: () =>
+diff --git a/apps/zcode-cli/packages/bootstrap/src/app/provider-registry-model-runtime.ts b/apps/zcode-cli/packages/bootstrap/src/app/provider-registry-model-runtime.ts
+index 3598d7e..6a49ec3 100644
+--- a/apps/zcode-cli/packages/bootstrap/src/app/provider-registry-model-runtime.ts
++++ b/apps/zcode-cli/packages/bootstrap/src/app/provider-registry-model-runtime.ts
+@@ -13,6 +13,7 @@ import { createRegistrySelectionProtocolError } from "./provider-registry-select
+ export type RuntimeModelFactory = NonNullable<AgentRuntimeDeps["modelFactory"]>;
+ 
+ export interface ProviderRegistryModelSource {
++  getSnapshot?(): import("@zcode/provider").ProviderRegistryServiceSnapshot | null;
+   getView(): ProviderRegistryView;
+   getProvider(providerId: string): Provider | undefined;
+   getModel(providerId: string, modelId: string): ProviderModel | undefined;
+diff --git a/apps/zcode-cli/packages/bootstrap/src/plugins.ts b/apps/zcode-cli/packages/bootstrap/src/plugins.ts
+index 8fcd68d..83ffb11 100644
+--- a/apps/zcode-cli/packages/bootstrap/src/plugins.ts
++++ b/apps/zcode-cli/packages/bootstrap/src/plugins.ts
+@@ -41,6 +41,7 @@ import {
+   type MarketplaceSource,
+   type PluginMarketplaceEntry,
+ } from "@zcode/adapters/plugins";
++import { normalizePluginOptions } from "./plugins/review-model-options.js";
+ import type {
+   Logger,
+   PluginHookDetail,
+@@ -916,7 +917,6 @@ export async function restoreBuiltinPlugin(options: RestoreBuiltinPluginOptions)
+ }
+ 
+ export async function configureZCodePlugin(options: ConfigureZCodePluginOptions): Promise<void> {
+-  const normalizedOptions = normalizePluginOptions(options.options);
+   const clearOptionKeys = normalizePluginOptionKeys(options.clearOptionKeys);
+   const { configResult, pluginStorageRoot, workingDirectory } = resolvePluginContext(options);
+   const outcome = resolveZCodePlugins({
+@@ -926,6 +926,7 @@ export async function configureZCodePlugin(options: ConfigureZCodePluginOptions)
+     workingDirectory,
+   });
+   const plugin = resolvePluginSelector(options.pluginId, outcome.plugins);
++  const normalizedOptions = normalizePluginOptions(options.options, plugin.id);
+   if (options.dryRun === true) return;
+   await updatePluginOptionsInFileConfig(
+     resolvePluginConfigPath(options, configResult, workingDirectory),
+@@ -1267,18 +1268,6 @@ function resolvePluginIdForMutation(options: UninstallZCodeMarketplacePluginOpti
+   throw new Error("pluginId or pluginName + marketplace is required");
+ }
+ 
+-function normalizePluginOptions(
+-  options: Record<string, unknown>,
+-): Record<string, string | number | boolean> {
+-  const result: Record<string, string | number | boolean> = {};
+-  for (const [key, value] of Object.entries(options)) {
+-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+-      result[key] = value;
+-    }
+-  }
+-  return result;
+-}
+-
+ function normalizePluginOptionKeys(keys: string[] | undefined): string[] {
+   return [...new Set((keys ?? []).map((key) => key.trim()).filter((key) => key.length > 0))];
+ }
+diff --git a/apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection.ts b/apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection.ts
+index b965640..88bf519 100644
+--- a/apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection.ts
++++ b/apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection.ts
+@@ -1,3 +1,4 @@
++import { projectPermissionReview } from "./product-projection-permission-review.js";
+ import { PERMISSION_FULL_ACCESS_OPTION_ID } from "@zcode/shared/zcode-protocol-v4";
+ // ProductProjection —— CLI 权威投影第二 reducer。
+ // 输入：CLI 事件日志（SessionEvent，权威事实源）；输出：ConversationDelta[]。
+@@ -1368,6 +1369,9 @@ export class ProductProjection {
+         return this.onToolCallResult(event);
+       case SessionEventType.ToolCallError:
+         return this.onToolCallError(event);
++      case SessionEventType.PermissionReviewStarted:
++      case SessionEventType.PermissionReviewCompleted:
++        return projectPermissionReview(event, this.findToolRow(String((event.payload as { toolCallId: string }).toolCallId)));
+       case SessionEventType.PermissionRequested:
+         return this.onPermissionRequested(event);
+       case SessionEventType.PermissionResolved:
+@@ -3147,6 +3151,7 @@ export class ProductProjection {
+         toolCallId,
+         toolName: payload.toolName,
+         summary: payload.reason,
++        ...(payload.reviewFailure ? { reviewFailure: payload.reviewFailure } : {}),
+         detail: payload.input,
+         freeText: true,
+         ...(payload.fullAccessSupported === true && !payload.origin && !payload.optionsPolicy
+diff --git a/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/interaction-broker.ts b/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/interaction-broker.ts
+index d7e8907..4fe9788 100644
+--- a/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/interaction-broker.ts
++++ b/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/interaction-broker.ts
+@@ -77,6 +77,7 @@ async function requestPermission(
+         {
+           input: request.input,
+           reason: request.reason,
++          ...(request.reviewFailure ? { reviewFailure: request.reviewFailure } : {}),
+           requestId: request.requestId,
+           riskLevel: request.riskLevel,
+           sessionId: request.sessionId,
+@@ -121,6 +122,7 @@ async function requestPermission(
+           }
+         : {}),
+     },
++    options?.onRegistered,
+   );
+   return {
+     ...response,
+diff --git a/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/interaction-response-race.ts b/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/interaction-response-race.ts
+index f136e0a..3db5d63 100644
+--- a/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/interaction-response-race.ts
++++ b/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/interaction-response-race.ts
+@@ -24,6 +24,7 @@ export async function raceClientRequestWithV4Interaction<T>(
+   startRequest: (signal: AbortSignal) => Promise<T>,
+   mapAnswer: (answer: V4InteractionAnswer) => T,
+   registrationOptions?: V4InteractionRegistrationOptions,
++  onRegistered?: () => Promise<void>,
+ ): Promise<T> {
+   const controller = new AbortController();
+   // 每次尝试独立等待失败通知；成功仍由 registry 的 V4 answer 解除等待。
+@@ -80,6 +81,11 @@ export async function raceClientRequestWithV4Interaction<T>(
+   };
+ 
+   try {
++    outerSignal?.throwIfAborted();
++    await onRegistered?.();
++    const readAnswer = (): { answer: V4InteractionAnswer } | undefined => v4Answer;
++    const registeredAnswer = readAnswer();
++    if (registeredAnswer) return mapAnswer(registeredAnswer.answer);
+     const result = await startRequest(controller.signal);
+     if (fullAccessFailure) {
+       await waitForFullAccess();
+diff --git a/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/session-mapper.ts b/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/session-mapper.ts
+index 0085472..3abc0dd 100644
+--- a/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/session-mapper.ts
++++ b/apps/zcode-cli/packages/bootstrap/src/zcode-protocol/session-mapper.ts
+@@ -332,7 +332,7 @@ export function mapSessionEvent(
+     traceId: String(event.traceId),
+     turnId: event.turnId ? String(event.turnId) : undefined,
+     type: mapSessionEventType(event.type),
+-  };
++  } as ZCodeSessionEvent;
+ }
+ 
+ export function mapSessionEventForProtocol(
+@@ -863,6 +863,7 @@ function mapPendingPermission(permission: PendingPermission): ZCodePendingPermis
+   // 旧桌面回传的是 response 原文，认不出会话语义（见 toLegacyPermissionOptionsPolicy）。
+   return {
+     input: permission.input,
++    ...(permission.reviewFailure ? { reviewFailure: permission.reviewFailure } : {}),
+     ...(permission.origin ? { origin: permission.origin } : {}),
+     options: buildProtocolPermissionOptions({
+       ...permission,
+@@ -1508,6 +1509,10 @@ function mapSessionEventType(type: SessionEvent["type"]): ZCodeSessionEvent["typ
+     case SessionEventType.ToolCallError:
+     case SessionEventType.ToolBatchComplete:
+       return "tool.updated";
++    case SessionEventType.PermissionReviewStarted:
++      return "permission.reviewStarted";
++    case SessionEventType.PermissionReviewCompleted:
++      return "permission.reviewCompleted";
+     case SessionEventType.PermissionRequested:
+       return "permission.requested";
+     case SessionEventType.PermissionResolved:
+diff --git a/apps/zcode-cli/packages/contracts/src/events/event-reducer.ts b/apps/zcode-cli/packages/contracts/src/events/event-reducer.ts
+index f252b55..eb03462 100644
+--- a/apps/zcode-cli/packages/contracts/src/events/event-reducer.ts
++++ b/apps/zcode-cli/packages/contracts/src/events/event-reducer.ts
+@@ -22,6 +22,7 @@ import type {
+   BackgroundTaskUpdatedPayload,
+   BackgroundTaskCompletedPayload,
+   PermissionRequestedPayload,
++  PermissionReviewPayload,
+   PermissionResolvedPayload,
+   PermissionDeniedPayload,
+   ModelCompletePayload,
+@@ -514,10 +515,22 @@ export class EventReducer {
+       return applyBackgroundTaskCompleted(p, payload, e.timestamp);
+     },
+ 
++    [EventTypes.PermissionReviewStarted]: (p, e) => {
++      const payload = e.payload as PermissionReviewPayload;
++      return { ...p, updatedAt: e.timestamp, activeToolCalls: p.activeToolCalls.map(tc =>
++        tc.toolCallId === payload.toolCallId ? { ...tc, permissionReview: { actualReviewModel: payload.actualReviewModel, requestId: payload.requestId, status: "reviewing" as const } } : tc) };
++    },
++    [EventTypes.PermissionReviewCompleted]: (p, e) => {
++      const payload = e.payload as PermissionReviewPayload;
++      return { ...p, updatedAt: e.timestamp, activeToolCalls: p.activeToolCalls.map(tc =>
++        tc.toolCallId === payload.toolCallId && tc.permissionReview?.requestId === payload.requestId
++          ? { ...tc, permissionReview: { actualReviewModel: payload.actualReviewModel, requestId: payload.requestId, status: payload.outcome ?? "failed", reviewFailure: payload.reviewFailure } } : tc) };
++    },
+     [EventTypes.PermissionRequested]: (p, e) => {
+       const payload = e.payload as PermissionRequestedPayload;
+       const newPending: PendingPermission = {
+         input: payload.input,
++        ...(payload.reviewFailure ? { reviewFailure: payload.reviewFailure } : {}),
+         reason: payload.reason,
+         requestId: payload.requestId,
+         toolCallId: payload.toolCallId,
+diff --git a/apps/zcode-cli/packages/contracts/src/events/session.events.ts b/apps/zcode-cli/packages/contracts/src/events/session.events.ts
+index 655c088..dab3171 100644
+--- a/apps/zcode-cli/packages/contracts/src/events/session.events.ts
++++ b/apps/zcode-cli/packages/contracts/src/events/session.events.ts
+@@ -1,3 +1,4 @@
++import type { ApprovalReviewFailure } from "../hooks/approval-assessment.js";
+ import type { ExecutionOutputPreview } from "../interfaces/execution.port.js";
+ import type { RuntimeInputPresentation } from "../interfaces/runtime-input-presentation.js";
+ /* eslint-disable max-lines -- session event 契约集中在单文件导出，避免 app/agent 协议类型分散后漂移。 */
+@@ -141,6 +142,8 @@ export const SessionEventType = {
+   // 命名刻意带 dynamic_：legacy `Workflow` 工具的 script run 事件（workflow_started /
+   // workflow_completed，script-workflow-runtime.ts）是另一套日志，同名会真的混淆。
+   DynamicWorkflowRunProgress: "dynamic_workflow_run_progress",
++  PermissionReviewStarted: "permission_review_started",
++  PermissionReviewCompleted: "permission_review_completed",
+   PermissionRequested: "permission_requested",
+   PermissionResolved: "permission_resolved",
+   PermissionDenied: "permission_denied",
+@@ -953,7 +956,15 @@ export interface DynamicWorkflowRunProgressPayload {
+   launchInputId?: string;
+ }
+ 
++export interface PermissionReviewPayload {
++  actualReviewModel?: import("../model/index.js").ModelSelection;
++  requestId: string; toolCallId: ToolCallId; toolName: string;
++  outcome?: "allow" | "deny" | "failed" | "cancelled";
++  reviewFailure?: ApprovalReviewFailure;
++}
++
+ export interface PermissionRequestedPayload {
++  reviewFailure?: ApprovalReviewFailure;
+   requestId?: string;
+   toolCallId: ToolCallId;
+   toolName: string;
+@@ -1222,6 +1233,7 @@ export type SessionEventPayload =
+   | BackgroundTaskUpdatedPayload
+   | BackgroundTaskCompletedPayload
+   | DynamicWorkflowRunProgressPayload
++  | PermissionReviewPayload
+   | PermissionRequestedPayload
+   | PermissionResolvedPayload
+   | PermissionDeniedPayload
 diff --git a/apps/zcode-cli/packages/contracts/src/hooks/index.ts b/apps/zcode-cli/packages/contracts/src/hooks/index.ts
-index 36d33cd..b351a12 100644
+index 36d33cd..d97b867 100644
 --- a/apps/zcode-cli/packages/contracts/src/hooks/index.ts
 +++ b/apps/zcode-cli/packages/contracts/src/hooks/index.ts
-@@ -1,4 +1,6 @@
+@@ -1,4 +1,8 @@
++export { approvalReviewFailure, ApprovalReviewFailureSchema, type ApprovalReviewFailure } from "./approval-assessment.js";
++import type { TraceContext } from "../tracing/tracer.js";
  import { z } from "zod";
-+import { approvalBindingFields, type ApprovalAssessment } from "./approval-assessment.js";
++import { approvalBindingFields, ApprovalReviewFailureSchema, type ApprovalReviewFailure, type ApprovalAssessment } from "./approval-assessment.js";
 +export type { ApprovalAssessment } from "./approval-assessment.js";
  import type { ModelToolSideEffectScope } from "../model/index.js";
  import type { CollaborationMode, RiskLevel } from "../interfaces/session.port.js";
  import type { PermissionUpdate } from "../interfaces/permission.port.js";
-@@ -147,7 +149,10 @@ export type HookInput =
+@@ -85,6 +89,8 @@ export interface PreToolUseHookInput extends BaseHookInput {
+ }
+ 
+ export interface PermissionRequestHookInput extends BaseHookInput {
++  /** Host-bound context; never taken from plugin output or socket ambient storage. */
++  traceContext?: TraceContext;
+   permissionSuggestions?: PermissionUpdate[];
+   hookEventName: typeof HookEventName.PermissionRequest;
+   reason: string;
+@@ -147,7 +153,11 @@ export type HookInput =
    | SessionStartHookInput
    | StopHookInput;
  
 -export type PermissionRequestHookDecision =
 +export type PermissionRequestHookDecision = {
++  actualReviewModel?: import("../model/index.js").ModelSelection; isStillCurrent?: () => boolean; // Host-only proof; never parsed from plugin JSON.
 +  bindingId?: string;
 +  assessment?: ApprovalAssessment;
 +} & (
    | {
        behavior: "allow";
        permissionUpdates?: PermissionUpdate[];
-@@ -158,7 +163,9 @@ export type PermissionRequestHookDecision =
+@@ -158,7 +168,9 @@ export type PermissionRequestHookDecision =
        behavior: "deny";
        interrupt?: boolean;
        message?: string;
 -    };
 +    }
-+  | { behavior: "ask"; message?: string }
++  | { behavior: "ask"; message?: string; reviewFailure?: ApprovalReviewFailure }
 +);
  
  export type HookSpecificOutput =
    | {
-@@ -207,6 +214,7 @@ export interface HookJSONOutput {
+@@ -207,6 +219,7 @@ export interface HookJSONOutput {
  
  const PermissionRequestHookDecisionSchema = z.union([
    z.object({
@@ -99,7 +509,7 @@ index 36d33cd..b351a12 100644
      behavior: z.literal("allow"),
      permissionUpdates: z
        .array(
-@@ -239,10 +247,12 @@ const PermissionRequestHookDecisionSchema = z.union([
+@@ -239,10 +252,12 @@ const PermissionRequestHookDecisionSchema = z.union([
      updatedInput: z.unknown().optional(),
    }),
    z.object({
@@ -108,7 +518,7 @@ index 36d33cd..b351a12 100644
      interrupt: z.boolean().optional(),
      message: z.string().optional(),
    }),
-+  z.object({ behavior: z.literal("ask"), message: z.string().optional() }),
++  z.object({ behavior: z.literal("ask"), message: z.string().optional(), reviewFailure: ApprovalReviewFailureSchema.optional() }),
  ]);
  
  export const HookSpecificOutputSchema = z.discriminatedUnion("hookEventName", [
@@ -122,20 +532,74 @@ index c2fe6db..ec05ee2 100644
  export * from "./interfaces/permission-full-access.js";
 +export * from "./interfaces/approval-bridge.port.js";
 diff --git a/apps/zcode-cli/packages/contracts/src/interfaces/permission.port.ts b/apps/zcode-cli/packages/contracts/src/interfaces/permission.port.ts
-index 9548dff..0186299 100644
+index 9548dff..dfc9fcb 100644
 --- a/apps/zcode-cli/packages/contracts/src/interfaces/permission.port.ts
 +++ b/apps/zcode-cli/packages/contracts/src/interfaces/permission.port.ts
-@@ -69,6 +69,8 @@ export interface PermissionBrokerRequest {
+@@ -2,6 +2,7 @@
+ // Permission Broker Port - async client permission boundary
+ // ============================================================
+ 
++import type { ApprovalReviewFailure } from "../hooks/approval-assessment.js";
+ import type { PermissionDecision } from "../events/session.events.js";
+ import type { ModelToolSideEffectScope } from "../model/index.js";
+ import type { CollaborationMode, RiskLevel } from "./session.port.js";
+@@ -50,6 +51,7 @@ export type PermissionBrokerReasonSource = "plan_approval_feedback" | "workflow_
+ export type PermissionOptionsPolicy = "no-always-allow" | "session-always-allow";
+ 
+ export interface PermissionBrokerRequest {
++  reviewFailure?: ApprovalReviewFailure;
+   requestId: string;
+   sessionId: SessionId;
+   turnId?: TurnId;
+@@ -69,6 +71,12 @@ export interface PermissionBrokerRequest {
  }
  
  export interface PermissionBrokerResult {
++  actualReviewModel?: import("../model/index.js").ModelSelection;
++  /** Runtime-only callback; never serialized to a client or persisted. */
++  isStillCurrent?: () => boolean;
++  requestManualFallback?: () => Promise<PermissionBrokerResult>;
 +  /** A denied hook can stop only this turn after feedback is delivered. */
 +  interrupt?: boolean;
    decision: PermissionDecision;
    reason?: string;
    /** V4 permission feedback 需要保留 provider-visible 原文；只由 broker 结果携带。 */
+@@ -86,6 +94,8 @@ export interface PermissionBrokerResult {
+ }
+ 
+ export interface PermissionBrokerRequestOptions {
++  /** Publish the prompt only after the broker installs its answer receiver. */
++  onRegistered?: () => Promise<void>;
+   /** 带提交副作用的应答先取得唯一胜者；失败保留用户审批，Hook 不再竞争。 */
+   claimResponse?: () => boolean;
+   signal?: AbortSignal;
+diff --git a/apps/zcode-cli/packages/contracts/src/interfaces/session.port.ts b/apps/zcode-cli/packages/contracts/src/interfaces/session.port.ts
+index 90d34f3..fc29aa4 100644
+--- a/apps/zcode-cli/packages/contracts/src/interfaces/session.port.ts
++++ b/apps/zcode-cli/packages/contracts/src/interfaces/session.port.ts
+@@ -1,3 +1,4 @@
++import type { ApprovalReviewFailure } from "../hooks/approval-assessment.js";
+ import type { RuntimeInputPresentation } from "./runtime-input-presentation.js";
+ // ============================================================
+ // Session Ports - Core interfaces for session management
+@@ -121,6 +122,7 @@ export interface TargetCompletionVerificationProjectionInfo {
+ }
+ 
+ export interface PendingPermission {
++  reviewFailure?: ApprovalReviewFailure;
+   requestId?: string;
+   toolCallId: string;
+   toolName: string;
+@@ -152,6 +154,7 @@ export interface PendingSteerInputInfo {
+ }
+ 
+ export interface ActiveToolCall {
++  permissionReview?: { actualReviewModel?: import("../model/index.js").ModelSelection; requestId: string; status: "reviewing" | "allow" | "deny" | "failed" | "cancelled"; reviewFailure?: ApprovalReviewFailure };
+   toolCallId: string;
+   toolName: string;
+   status: ToolCallStatus;
 diff --git a/apps/zcode-cli/packages/contracts/src/model/index.ts b/apps/zcode-cli/packages/contracts/src/model/index.ts
-index 58a7192..1311e96 100644
+index 58a7192..9481986 100644
 --- a/apps/zcode-cli/packages/contracts/src/model/index.ts
 +++ b/apps/zcode-cli/packages/contracts/src/model/index.ts
 @@ -39,6 +39,7 @@ export const ModelRequestSessionType = {
@@ -146,19 +610,75 @@ index 58a7192..1311e96 100644
    Default: "default",
    Unbounded: "unbounded",
  } as const;
+@@ -324,6 +325,7 @@ export interface ModelToolCall {
+   name: string;
+   input: unknown;
+   providerExecuted?: boolean;
++  providerOptions?: Record<string, unknown>;
+ }
+ 
+ export type AttachmentKind = "local_file" | "resource" | "inline";
+@@ -342,6 +344,7 @@ export interface AttachmentRef {
+ export interface ModelTextContentBlock {
+   type: "text";
+   text: string;
++  providerOptions?: Record<string, unknown>;
+ }
+ 
+ export interface ModelReasoningContentBlock {
+@@ -409,6 +412,7 @@ export interface ModelInputMessage {
+   isError?: boolean;
+   providerId?: ModelProviderId;
+   modelId?: ModelId;
++  providerOptions?: Record<string, unknown>;
+ }
+ 
+ export function modelMessageContentToText(content: ModelMessageContent): string {
+@@ -815,6 +819,7 @@ export const modelSelectionJsonSchema = {
+   properties: {
+     providerId: { type: "string", minLength: 1 },
+     modelId: { type: "string", minLength: 1 },
++    providerOptions: { type: "object" },
+     options: {
+       type: "object",
+       additionalProperties: false,
+diff --git a/apps/zcode-cli/packages/contracts/src/plugins/index.ts b/apps/zcode-cli/packages/contracts/src/plugins/index.ts
+index 048f6d5..8834bbd 100644
+--- a/apps/zcode-cli/packages/contracts/src/plugins/index.ts
++++ b/apps/zcode-cli/packages/contracts/src/plugins/index.ts
+@@ -63,7 +63,8 @@ export interface PluginUserConfigOption {
+   type?: "string" | "number" | "boolean" | "directory" | "file";
+ }
+ 
+-export type PluginOptionValue = string | number | boolean;
++export { reviewModelSelectionSchema, type ReviewModelSelection } from "./review-model.js";
++export type PluginOptionValue = string | number | boolean | import("./review-model.js").ReviewModelSelection;
+ export type PluginOptionValues = Record<string, PluginOptionValue>;
+ 
+ export type PluginMarketplaceSourceConfig =
 diff --git a/apps/zcode-cli/packages/core/src/hooks/configured-runner-callback.ts b/apps/zcode-cli/packages/core/src/hooks/configured-runner-callback.ts
-index 96b6bf8..b404091 100644
+index 96b6bf8..2f730a9 100644
 --- a/apps/zcode-cli/packages/core/src/hooks/configured-runner-callback.ts
 +++ b/apps/zcode-cli/packages/core/src/hooks/configured-runner-callback.ts
-@@ -23,6 +23,57 @@ export function createConfiguredHookCallback(
+@@ -1,7 +1,9 @@
+ import {
++  approvalReviewFailure,
+   CoreErrorType,
+   HookEventName,
+   HookJSONOutputSchema,
++  SessionEventType,
+   createCoreError,
+   type ExecutionResult,
+   type HookConfig,
+@@ -23,6 +25,69 @@ export function createConfiguredHookCallback(
    hookIndex: number,
    execution: { maxOutputBytes: number; timeoutMs: number },
  ): HookCallback {
 +  const isReviewer = event === HookEventName.PermissionRequest && hook.plugin?.name === "codex-auto-approval";
 +  if (!isReviewer) return createProcessHookCallback(options, event, hook, matcherIndex, hookIndex, execution);
 +  return async (input, context) => {
-+    const ask = (message: string): HookJSONOutput => ({ hookSpecificOutput: {
-+      hookEventName: HookEventName.PermissionRequest, decision: { behavior: "ask", message },
++    const ask = (message: string, failure = approvalReviewFailure({ message })): HookJSONOutput => ({ hookSpecificOutput: {
++      hookEventName: HookEventName.PermissionRequest, decision: { behavior: "ask", message, reviewFailure: failure },
 +    } });
 +    if (input.hookEventName !== HookEventName.PermissionRequest || !input.turnId || !options.approvalBridgePort) {
 +      return ask("The adapted desktop approval bridge is unavailable");
@@ -166,10 +686,20 @@ index 96b6bf8..b404091 100644
 +    const deadline = Date.now() + 90000;
 +    const timeoutSignal = AbortSignal.timeout(90000);
 +    const signal = context.signal ? AbortSignal.any([context.signal, timeoutSignal]) : timeoutSignal;
++    let reportedModel = JSON.stringify(options.approvalBridgePort.reviewModel?.(hook.plugin));
 +    for (let attempt = 0; attempt < 3; attempt++) {
 +      signal.throwIfAborted();
-+      const lease = await options.approvalBridgePort.open(input, signal, hook.plugin);
++      let lease: import("@zcode/contracts").ApprovalBridgeLease | undefined;
 +      try {
++      lease = await options.approvalBridgePort.open(input, signal, hook.plugin, async actualReviewModel => {
++        const next = JSON.stringify(actualReviewModel);
++        if (next === reportedModel) return;
++        reportedModel = next;
++        await options.emitEvent?.({ id: crypto.randomUUID() as any, sessionId: input.sessionId,
++          turnId: input.turnId, traceId: input.traceId, timestamp: new Date(), sequenceNumber: 0,
++          type: SessionEventType.PermissionReviewStarted,
++          payload: { requestId: input.requestId, toolCallId: input.toolCallId, toolName: input.toolName, actualReviewModel } });
++      });
 +        const callback = createProcessHookCallback(options, event, hook, matcherIndex, hookIndex,
 +          { ...execution, timeoutMs: Math.min(execution.timeoutMs, deadline - Date.now()) }, lease.env);
 +        const result = await callback(input, { ...context, signal });
@@ -178,12 +708,14 @@ index 96b6bf8..b404091 100644
 +        const validated = lease.finish(output || undefined);
 +        const specific = validated.hookSpecificOutput;
 +        if (specific?.hookEventName === HookEventName.PermissionRequest &&
-+          specific.decision?.behavior === "ask" && specific.decision.message?.startsWith("STALE_CONTEXT:") && attempt < 2) continue;
++          specific.decision?.behavior === "ask" && specific.decision.reviewFailure?.code === "stale_context" && attempt < 2) continue;
 +        return validated;
 +      } catch (error) {
 +        context.signal?.throwIfAborted();
-+        return ask(`Automatic review unavailable: ${error instanceof Error ? error.message : String(error)}`);
-+      } finally { await lease.close(); }
++        return ask("Automatic review unavailable", timeoutSignal.aborted
++          ? { code: "timeout", message: "Automatic review exceeded its total 90-second deadline" }
++          : approvalReviewFailure(error));
++      } finally { await lease?.close(); }
 +    }
 +    return ask("Automatic review context kept changing");
 +  };
@@ -208,7 +740,7 @@ index 96b6bf8..b404091 100644
    switch (hook.type) {
      case "command":
        return async (input, context) => {
-@@ -41,7 +92,7 @@ export function createConfiguredHookCallback(
+@@ -41,7 +106,7 @@ export function createConfiguredHookCallback(
                  shell: hook.shell,
                },
                cwd: input.cwd || options.getWorkingDirectory(),
@@ -217,7 +749,7 @@ index 96b6bf8..b404091 100644
                stdin: stdin.value,
                timeoutMs: execution.timeoutMs,
                outputLimit: {
-@@ -86,7 +137,7 @@ export function createConfiguredHookCallback(
+@@ -86,7 +151,7 @@ export function createConfiguredHookCallback(
                  ),
                },
                cwd: input.cwd || options.getWorkingDirectory(),
@@ -226,6 +758,44 @@ index 96b6bf8..b404091 100644
                stdin: stdin.value,
                timeoutMs: execution.timeoutMs,
                outputLimit: {
+diff --git a/apps/zcode-cli/packages/core/src/hooks/configured-runner.ts b/apps/zcode-cli/packages/core/src/hooks/configured-runner.ts
+index b616337..2c3d940 100644
+--- a/apps/zcode-cli/packages/core/src/hooks/configured-runner.ts
++++ b/apps/zcode-cli/packages/core/src/hooks/configured-runner.ts
+@@ -8,6 +8,7 @@ import {
+ import { resolveWorkspaceHookMaxOutputBytes } from "@zcode/shared/workspace-hook-discovery";
+ import { expandPluginVariables, resolveHookTimeoutMs } from "./configured-runner-input.js";
+ import { createHookExecutionDescriptor } from "./display-metadata.js";
++import { matchesAnyHookMatcher } from "./runner-helpers.js";
+ import { InMemoryHookRunner } from "./runner.js";
+ import { createConfiguredHookCallback } from "./configured-runner-callback.js";
+ import type { ConfiguredHookRunnerOptions, HookRegistration, HookRunner } from "./types.js";
+@@ -19,12 +20,24 @@ export function createConfiguredHookRunner(
+   const workspaceHooks = createWorkspaceHookRegistrations(options);
+   const hooks = insertWorkspaceHooks(configuredHooks, workspaceHooks);
+   if (hooks.length === 0) return undefined;
+-  return new InMemoryHookRunner({
++  const runner = new InMemoryHookRunner({
+     defaultTimeoutMs: options.config.timeoutMs,
+     emitEvent: options.emitEvent,
+     hooks,
+     logger: options.logger,
+   });
++  return Object.assign(runner, {
++    automaticReviewModel: (match: import("./types.js").HookRunOptions) => {
++      const plugin = (options.config.events.PermissionRequest ?? []).filter(group => matchesAnyHookMatcher(match, group.matcher))
++        .flatMap(group => group.hooks).find(hook => hook.enabled !== false && hook.plugin?.name === "codex-auto-approval" && hook.type === "process")?.plugin;
++      return options.approvalBridgePort?.reviewModel?.(plugin, match.reviewRequestId);
++    },
++    hasAutomaticPermissionReview: (match: import("./types.js").HookRunOptions) => !!options.approvalBridgePort &&
++      options.config.enabled && (options.config.events.PermissionRequest ?? []).some(group =>
++        matchesAnyHookMatcher(match, group.matcher) && group.hooks.some(hook => hook.enabled !== false &&
++          hook.plugin?.name === "codex-auto-approval" && hook.type === "process" &&
++          options.approvalBridgePort?.isActive?.(hook.plugin) !== false)),
++  });
+ }
+ 
+ function createConfiguredHookRegistrations(
 diff --git a/apps/zcode-cli/packages/core/src/hooks/output.ts b/apps/zcode-cli/packages/core/src/hooks/output.ts
 index 2cb3516..a182682 100644
 --- a/apps/zcode-cli/packages/core/src/hooks/output.ts
@@ -249,7 +819,7 @@ index 2cb3516..a182682 100644
    if (next.hookPermissionDecisionReason) {
      target.hookPermissionDecisionReason = next.hookPermissionDecisionReason;
 diff --git a/apps/zcode-cli/packages/core/src/hooks/types.ts b/apps/zcode-cli/packages/core/src/hooks/types.ts
-index 017dde1..160da83 100644
+index 017dde1..0dee509 100644
 --- a/apps/zcode-cli/packages/core/src/hooks/types.ts
 +++ b/apps/zcode-cli/packages/core/src/hooks/types.ts
 @@ -1,4 +1,5 @@
@@ -258,7 +828,25 @@ index 017dde1..160da83 100644
    ExecutionPort,
    HookEventName,
    HookExecutionDescriptor,
-@@ -93,6 +94,7 @@ export interface HookRunnerOptions {
+@@ -64,6 +65,7 @@ export interface HookRegistration {
+ }
+ 
+ export interface HookRunOptions {
++  reviewRequestId?: string;
+   matchValue?: string;
+   matchValues?: readonly string[];
+   signal?: AbortSignal;
+@@ -82,6 +84,9 @@ export interface HookRunResult {
+ }
+ 
+ export interface HookRunner {
++  automaticReviewModel?: (options: HookRunOptions) => import("@zcode/contracts").ModelSelection | undefined;
++  /** Advertised from loaded native hook registrations, never from composer state. */
++  hasAutomaticPermissionReview?: (options: HookRunOptions) => boolean;
+   run(input: HookInput, options?: HookRunOptions): Promise<HookRunResult>;
+ }
+ 
+@@ -93,6 +98,7 @@ export interface HookRunnerOptions {
  }
  
  export interface ConfiguredHookRunnerOptions {
@@ -373,6 +961,25 @@ index 0004408..a606e1c 100644
    agentTelemetry?: AgentExecutionTelemetryPort;
    agentTelemetryCausation?: AgentTelemetryCausation;
    agentTelemetryCausationMode?: "child" | "linked_root";
+diff --git a/apps/zcode-cli/packages/core/src/tool/executor/call-runner.ts b/apps/zcode-cli/packages/core/src/tool/executor/call-runner.ts
+index bde9a6d..1429cda 100644
+--- a/apps/zcode-cli/packages/core/src/tool/executor/call-runner.ts
++++ b/apps/zcode-cli/packages/core/src/tool/executor/call-runner.ts
+@@ -366,6 +366,14 @@ async function executeToolCallImpl(
+   let skillTelemetryMetadata: SkillTelemetryMetadata | undefined;
+ 
+   try {
++    // 审查放行后仍会异步发布事件；执行前再次校验宿主证明，失效只进入原生人工审批。
++    if (permissionResult.finalAuthorization) {
++      let finalDecision = await permissionResult.finalAuthorization();
++      if (finalDecision.isStillCurrent?.() === false && finalDecision.requestManualFallback) finalDecision = await finalDecision.requestManualFallback();
++      if (finalDecision.decision !== "allow" || finalDecision.modifiedInput !== undefined ||
++        finalDecision.permissionUpdates?.length || finalDecision.sessionPermissionUpdates?.length) throw createCoreError(CoreErrorType.PermissionDenied,
++        finalDecision.reason ?? "Approval changed before execution", { recoverable: true });
++    }
+     const model = options?.model ?? deps.model;
+     const bashShellSelection = deps.getBashShellSelection?.() ?? deps.bashShellSelection;
+     const embeddedSearchDecision = resolveEmbeddedSearchBranchCapability({
 diff --git a/apps/zcode-cli/packages/core/src/tool/executor/errors.ts b/apps/zcode-cli/packages/core/src/tool/executor/errors.ts
 index 062f3f8..89d452e 100644
 --- a/apps/zcode-cli/packages/core/src/tool/executor/errors.ts
@@ -401,15 +1008,62 @@ index 062f3f8..89d452e 100644
 +    } : {}),
 +  };
  }
+diff --git a/apps/zcode-cli/packages/core/src/tool/executor/events.ts b/apps/zcode-cli/packages/core/src/tool/executor/events.ts
+index 7d19a6a..24580fd 100644
+--- a/apps/zcode-cli/packages/core/src/tool/executor/events.ts
++++ b/apps/zcode-cli/packages/core/src/tool/executor/events.ts
+@@ -142,7 +142,7 @@ export async function emitPermissionRequested(
+   reason: string | undefined,
+   suggestedPermissionUpdates: PermissionUpdate[],
+   traceContext: TraceContext,
+-  approval?: { display?: ToolResultDisplayPayload; optionsPolicy?: PermissionOptionsPolicy },
++  approval?: { display?: ToolResultDisplayPayload; optionsPolicy?: PermissionOptionsPolicy; reviewFailure?: import("@zcode/contracts").ApprovalReviewFailure },
+ ): Promise<void> {
+   await deps.emitEvent({
+     id: crypto.randomUUID() as any,
+@@ -160,6 +160,7 @@ export async function emitPermissionRequested(
+       reason: reason ?? `Tool ${toolCall.name} requires approval`,
+       input,
+       suggestedPermissionUpdates,
++      ...(approval?.reviewFailure ? { reviewFailure: approval.reviewFailure } : {}),
+       ...(approval?.display ? { display: approval.display } : {}),
+       ...(approval?.optionsPolicy ? { optionsPolicy: approval.optionsPolicy } : {}),
+       ...(deps.sessionModePort?.supportsPermissionFullAccess?.()
 diff --git a/apps/zcode-cli/packages/core/src/tool/executor/hook-flow.ts b/apps/zcode-cli/packages/core/src/tool/executor/hook-flow.ts
-index d59a578..d3650c6 100644
+index d59a578..8fe2f77 100644
 --- a/apps/zcode-cli/packages/core/src/tool/executor/hook-flow.ts
 +++ b/apps/zcode-cli/packages/core/src/tool/executor/hook-flow.ts
-@@ -81,10 +81,12 @@ export async function runPermissionRequestHooks(
+@@ -1,4 +1,6 @@
+ import {
++  approvalReviewFailure,
++  type ApprovalReviewFailure,
+   CoreErrorType,
+   HookEventName,
+   isCoreError,
+@@ -55,6 +57,7 @@ export async function runPermissionRequestHooks(
+   mode: CollaborationMode,
+   traceContext: TraceContext,
+   signal?: AbortSignal,
++  onAsk?: (failure: ApprovalReviewFailure) => void,
+ ): Promise<PermissionBrokerResult | undefined> {
+   if (!deps.hookRunner) return undefined;
+   const hookResult = await deps.hookRunner.run(
+@@ -71,6 +74,7 @@ export async function runPermissionRequestHooks(
+       toolCallId: toolCall.id,
+       toolInput: input,
+       toolName: toolCall.name,
++      traceContext: structuredClone(traceContext),
+       traceId: traceContext.traceId,
+       turnId: traceContext.turnId ?? deps.turnId,
+     },
+@@ -81,10 +85,15 @@ export async function runPermissionRequestHooks(
      },
    );
    const decision = hookResult.permissionRequestResult;
-+  if (decision?.behavior === "ask" && !hookResult.preventContinuation) return undefined;
++  if (decision?.behavior === "ask" && !hookResult.preventContinuation) {
++    onAsk?.(decision.reviewFailure ?? approvalReviewFailure({ message: decision.message }));
++    return undefined;
++  }
    if (hookResult.preventContinuation) {
      return {
        decision: "deny",
@@ -418,8 +1072,11 @@ index d59a578..d3650c6 100644
      };
    }
    if (!decision) {
-@@ -105,8 +107,11 @@ export async function runPermissionRequestHooks(
+@@ -103,13 +112,18 @@ export async function runPermissionRequestHooks(
+   }
+   if (decision.behavior === "deny") {
      return {
++      actualReviewModel: decision.actualReviewModel, isStillCurrent: decision.isStillCurrent,
        decision: "deny",
        reason: decision.message ?? "Denied by PermissionRequest hook",
 +      preserveReasonFormatting: true,
@@ -430,11 +1087,122 @@ index d59a578..d3650c6 100644
    const permissionUpdates = decision.permissionUpdates ?? decision.updatedPermissions;
    return decision.updatedInput === undefined
      ? {
++        actualReviewModel: decision.actualReviewModel, isStillCurrent: decision.isStillCurrent,
+         decision: "allow",
+         permissionUpdates,
+         reason: "Allowed by PermissionRequest hook",
 diff --git a/apps/zcode-cli/packages/core/src/tool/executor/permission-flow.ts b/apps/zcode-cli/packages/core/src/tool/executor/permission-flow.ts
-index 49ed540..8e4e846 100644
+index 49ed540..1fb0702 100644
 --- a/apps/zcode-cli/packages/core/src/tool/executor/permission-flow.ts
 +++ b/apps/zcode-cli/packages/core/src/tool/executor/permission-flow.ts
-@@ -325,9 +325,7 @@ export async function resolveToolPermission(
+@@ -16,9 +16,9 @@ import type { ExecutableToolCall, ToolEntry, ToolExecutionResult } from "../type
+ import { normalizeToolExecutionInput } from "../input-normalization.js";
+ import { resolveToolApproval } from "./approval-gate.js";
+ import { createErrorResult, createPermissionErrorResult } from "./errors.js";
+-import { emitPermissionDenied, emitPermissionRequested, emitPermissionResolved } from "./events.js";
+-import { applyPreToolPermissionDecision, runPermissionRequestHooks } from "./hook-flow.js";
+-import { racePermissionResponders } from "./permission-responder-race.js";
++import { emitPermissionDenied, emitPermissionResolved } from "./events.js";
++import { resolvePermissionResponders } from "./permission-review-flow.js";
++import { applyPreToolPermissionDecision } from "./hook-flow.js";
+ import {
+   loadProjectPermissionRuleset,
+   persistProjectPermissionUpdates,
+@@ -35,7 +35,7 @@ import { validateInput } from "./validation.js";
+ import { applyMemoryFilePermission } from "./memory-file-permission.js";
+ 
+ type ToolPermissionFlowResult =
+-  | { allowed: true; executionInput: unknown; permissionWaitMs?: number }
++  | { allowed: true; executionInput: unknown; permissionWaitMs?: number; finalAuthorization?: () => Promise<PermissionBrokerResult> }
+   | { allowed: false; result: ToolExecutionResult };
+ 
+ export async function resolveToolPermission(
+@@ -159,80 +159,16 @@ export async function resolveToolPermission(
+ 
+   const requestId = `perm_${crypto.randomUUID()}`;
+   telemetry?.markPermissionRequested();
+-  await emitPermissionRequested(
+-    deps,
+-    toolCall,
+-    executionInput,
+-    requestId,
+-    permissionDecision.riskLevel,
+-    permissionDecision.reason,
+-    suggestedPermissionUpdates,
+-    traceContext,
+-    approval,
+-  );
++
+ 
+   let brokerResult: PermissionBrokerResult;
+   let normalizedHookModifiedInput: unknown;
+   let useNormalizedHookModifiedInput = false;
+   const permissionWaitStartedAt = Date.now();
+   try {
+-    // 这里曾经串行 `await runPermissionRequestHooks(...)`，
+-    // broker 要等 hook 链返回才启动。同步 PermissionRequest hook（外部审批桥接）阻塞期间，
+-    // 确认窗已经渲染（上面的 emitPermissionRequested），但应答 deferred 尚未注册，用户的
+-    // 每一次点击都被 resolveInteraction 按幂等语义静默丢弃——确认窗永久死亡。
+-    // 修法：hook 链与 broker 并发竞速，先到的决定生效，败者被 abort 且不被等待。
+-    const raceOutcome = await racePermissionResponders({
+-      onHookFailure: (error) => {
+-        // hook 链故障只令其退赛：辅助应答方的基础设施故障不应替用户做拒绝决定，
+-        // 确认窗继续等待 broker 应答。
+-        deps.logger?.warn("PermissionRequest hook chain failed; waiting for client decision", {
+-          ...traceContextToLogContext(traceContext),
+-          errorMessage: error instanceof Error ? error.message : String(error),
+-          event: "tool.permission.hook_race_forfeited",
+-          module: "core.tool.executor",
+-          requestId,
+-          status: "waiting",
+-          toolCallId: toolCall.id,
+-          toolName: toolCall.name,
+-        });
+-      },
+-      requestBroker: (brokerSignal, claimResponse) =>
+-        deps.permissionBroker.requestPermission(
+-          {
+-            input: executionInput,
+-            mode,
+-            reason: permissionDecision.reason ?? `Tool ${toolCall.name} requires approval`,
+-            requestId,
+-            requestedAt: new Date(),
+-            riskLevel: permissionDecision.riskLevel,
+-            ruleId: permissionDecision.ruleId,
+-            sessionId: deps.sessionId,
+-            sideEffectScope: permissionDecision.sideEffectScope,
+-            suggestedPermissionUpdates,
+-            ...(approval.optionsPolicy ? { optionsPolicy: approval.optionsPolicy } : {}),
+-            toolCallId: toolCall.id as PermissionBrokerRequest["toolCallId"],
+-            toolName: toolCall.name,
+-            traceId: traceContext.traceId,
+-            turnId: traceContext.turnId ?? deps.turnId,
+-          },
+-          {
+-            signal: brokerSignal,
+-            claimResponse,
+-            timeoutMs: deps.permissionTimeoutMs,
+-          },
+-        ),
+-      runHooks: (hookSignal) =>
+-        runPermissionRequestHooks(
+-          deps,
+-          toolCall,
+-          executionInput,
+-          requestId,
+-          permissionDecision,
+-          mode,
+-          traceContext,
+-          hookSignal,
+-        ),
+-      ...(signal === undefined ? {} : { signal }),
++    const raceOutcome = await resolvePermissionResponders({
++      deps, toolCall, executionInput, requestId, permissionDecision, mode,
++      traceContext, signal, suggestedPermissionUpdates, approval,
+     });
+     brokerResult = raceOutcome.result;
+     const permissionHookResult = raceOutcome.source === "hook" ? raceOutcome.result : undefined;
+@@ -325,9 +261,7 @@ export async function resolveToolPermission(
            requestId,
            ruleId: permissionDecision.ruleId,
          },
@@ -445,6 +1213,16 @@ index 49ed540..8e4e846 100644
        ),
      };
    }
+@@ -409,6 +343,9 @@ export async function resolveToolPermission(
+       allowed: true,
+       executionInput: useNormalizedHookModifiedInput ? normalizedHookModifiedInput : executionInput,
+       permissionWaitMs,
++      ...(resolvedPermission.isStillCurrent && resolvedPermission.requestManualFallback ? {
++        finalAuthorization: async () => resolvedPermission.isStillCurrent!() ? resolvedPermission : resolvedPermission.requestManualFallback!(),
++      } : {}),
+     };
+   }
+ 
 diff --git a/apps/zcode-cli/packages/core/src/tool/types.ts b/apps/zcode-cli/packages/core/src/tool/types.ts
 index 051a9c5..232c60d 100644
 --- a/apps/zcode-cli/packages/core/src/tool/types.ts
@@ -479,6 +1257,375 @@ index e444d70..8501970 100644
  // Electron 的 app.getPath("home") 不一定跟随测试进程里的 HOME 覆盖。
  // e2e 默认工作区依赖 home 路径，因此提供显式覆盖，避免测试写到开发者真实 ~/ZCodeProject。
  export const runtimeHomePath = readRuntimeEnvOverride("ZCODE_DESKTOP_HOME_DIR");
+diff --git a/packages/shared/src/zcode-protocol-v4/rows.ts b/packages/shared/src/zcode-protocol-v4/rows.ts
+index d1753ef..9cf1d6b 100644
+--- a/packages/shared/src/zcode-protocol-v4/rows.ts
++++ b/packages/shared/src/zcode-protocol-v4/rows.ts
+@@ -1,3 +1,5 @@
++import { modelSelectionSchema } from "../model-selection.js";
++import { zcodeApprovalReviewFailureSchema } from "../zcode-protocol/approval-review.js";
+ // ConversationRow：行类型自包含。
+ // 三条结构性规则：row 自包含（渲染任一行不需看别的行）；
+ // 结构变化换整行（row.upserted），文本增长用 append（row.delta）；turn 是 row 上的标签不是容器。
+@@ -189,6 +191,11 @@ export const cuaAppIdentitySchema = z
+ export type CuaAppIdentity = z.infer<typeof cuaAppIdentitySchema>;
+ 
+ export const toolCallRowSchema = z.object({
++  permissionReview: z.object({
++    actualReviewModel: modelSelectionSchema.optional(),
++    requestId: z.string(), status: z.enum(["reviewing", "allow", "deny", "failed", "cancelled"]),
++    reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
++  }).optional(),
+   ...rowBaseFields,
+   kind: z.literal("toolCall"),
+   // 同一模型 response 的正文与工具共享此 ID；optional 兼容旧 snapshot。
+diff --git a/packages/shared/src/zcode-protocol-v4/snapshot.ts b/packages/shared/src/zcode-protocol-v4/snapshot.ts
+index 099b66c..a821d49 100644
+--- a/packages/shared/src/zcode-protocol-v4/snapshot.ts
++++ b/packages/shared/src/zcode-protocol-v4/snapshot.ts
+@@ -1,3 +1,4 @@
++import { zcodeApprovalReviewFailureSchema } from "../zcode-protocol/approval-review.js";
+ /* oxlint-disable max-lines -- v4 snapshot schema is a frozen cross-process contract; additions stay grouped here. */
+ // ConversationSnapshot A 区。
+ // A 区更新语义 = 字段级整体替换（state.updated），绝不深合并——深合并是错乱之母。
+@@ -235,6 +236,7 @@ const permissionOptionSchema = z.object({
+ });
+ 
+ export const permissionRequestPayloadSchema = z.object({
++  reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
+   kind: z.literal("permission"),
+   toolCallId: z.string(),
+   toolName: z.string(),
+diff --git a/packages/shared/src/zcode-protocol/index.ts b/packages/shared/src/zcode-protocol/index.ts
+index 5b3de01..3f8f369 100644
+--- a/packages/shared/src/zcode-protocol/index.ts
++++ b/packages/shared/src/zcode-protocol/index.ts
+@@ -1,3 +1,5 @@
++import { zcodeApprovalReviewFailureSchema } from "./approval-review.js";
++export { zcodeApprovalReviewFailureSchema } from "./approval-review.js";
+ import {
+   databaseStartupErrorCodeSchema,
+   databaseStartupErrorDetailsSchema,
+@@ -922,8 +924,16 @@ export const zcodeSessionSettingsStateSchema = z
+   })
+   .strict();
+ export type ZCodeSessionSettingsState = z.infer<typeof zcodeSessionSettingsStateSchema>;
++
++export const zcodePermissionReviewEventPayloadSchema = z.object({
++  actualReviewModel: modelSelectionSchema.optional(),
++  requestId: nonEmptyString, toolCallId: nonEmptyString, toolName: nonEmptyString,
++  outcome: z.enum(["allow", "deny", "failed", "cancelled"]).optional(),
++  reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
++}).strict();
+ export const zcodePendingPermissionSchema = z
+   .object({
++    reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
+     requestId: nonEmptyString,
+     toolCallId: nonEmptyString,
+     toolName: nonEmptyString,
+@@ -1117,6 +1127,8 @@ export const zcodeSessionEventTypeSchema = z.enum([
+   "part.removed",
+   "model.streaming",
+   "tool.updated",
++  "permission.reviewStarted",
++  "permission.reviewCompleted",
+   "permission.requested",
+   "permission.resolved",
+   "userInput.requested",
+@@ -1385,6 +1397,7 @@ export const zcodeToolUpdatedEventPayloadSchema = z.discriminatedUnion("kind", [
+ ]);
+ export const zcodePermissionRequestedEventPayloadSchema = z
+   .object({
++    reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
+     requestId: nonEmptyString.optional(),
+     toolCallId: nonEmptyString,
+     toolName: nonEmptyString,
+@@ -1461,6 +1474,8 @@ export const zcodeSessionEventSchema = z.discriminatedUnion("type", [
+   zcodeSessionEventEnvelopeFor("part.removed", zcodeMessagePartRemovedEventPayloadSchema),
+   zcodeSessionEventEnvelopeFor("model.streaming", zcodeModelStreamingEventPayloadSchema),
+   zcodeSessionEventEnvelopeFor("tool.updated", zcodeToolUpdatedEventPayloadSchema),
++  zcodeSessionEventEnvelopeFor("permission.reviewStarted", zcodePermissionReviewEventPayloadSchema),
++  zcodeSessionEventEnvelopeFor("permission.reviewCompleted", zcodePermissionReviewEventPayloadSchema),
+   zcodeSessionEventEnvelopeFor("permission.requested", zcodePermissionRequestedEventPayloadSchema),
+   zcodeSessionEventEnvelopeFor("permission.resolved", zcodePermissionResolvedEventPayloadSchema),
+   zcodeSessionEventEnvelopeFor("userInput.requested", zcodeUserInputRequestedEventPayloadSchema),
+@@ -2278,6 +2293,7 @@ export type ZCodeWorkspaceUpdateDynamicWorkflowPolicyResult = z.infer<
+ 
+ export const zcodePermissionRequestParamsSchema = z
+   .object({
++    reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
+     requestId: nonEmptyString,
+     sessionId: nonEmptyString,
+     turnId: nonEmptyString.optional(),
+@@ -2480,7 +2496,14 @@ export type ZCodeOfficialMcpAuthHeadersResponse = z.infer<
+ 
+ // ── Plugin management (list + enable/disable) ──
+ // 镜像 @zcode/contracts 的 PluginMetadata, 仅保留 UI 需要的可序列化字段。
+-export const zcodePluginOptionValueSchema = z.union([z.string(), z.number(), z.boolean()]);
++export const zcodeReviewModelSelectionSchema = z.discriminatedUnion("mode", [
++  z.object({ mode: z.literal("inherit") }).strict(),
++  z.object({ mode: z.literal("specified"), providerId: z.string().trim().min(1).max(200),
++    modelId: z.string().trim().min(1).max(200),
++    options: z.object({ reasoningLevel: z.string().trim().min(1).max(80) }).strict().optional() }).strict(),
++]);
++export type ZCodeReviewModelSelection = z.infer<typeof zcodeReviewModelSelectionSchema>;
++export const zcodePluginOptionValueSchema = z.union([z.string(), z.number(), z.boolean(), zcodeReviewModelSelectionSchema]);
+ export type ZCodePluginOptionValue = z.infer<typeof zcodePluginOptionValueSchema>;
+ export const zcodePluginScopeSchema = z.enum(["user", "workspace"]);
+ export type ZCodePluginScope = z.infer<typeof zcodePluginScopeSchema>;
+diff --git a/packages/shared/src/zcode-task-types-core.ts b/packages/shared/src/zcode-task-types-core.ts
+index 268ff83..29c88d9 100644
+--- a/packages/shared/src/zcode-task-types-core.ts
++++ b/packages/shared/src/zcode-task-types-core.ts
+@@ -611,6 +611,7 @@ export interface ZCodePlanStep {
+   status: "pending" | "in_progress" | "completed";
+ }
+ export interface ZCodePermissionRequest {
++  reviewFailure?: { code: string; message: string };
+   type: "permission_request";
+   taskId: string;
+   traceId: TraceId;
+diff --git a/packages/ui/src/PermissionDialog.tsx b/packages/ui/src/PermissionDialog.tsx
+index c78c5bd..7110cf5 100644
+--- a/packages/ui/src/PermissionDialog.tsx
++++ b/packages/ui/src/PermissionDialog.tsx
+@@ -696,14 +696,18 @@ export function PermissionDialog({
+           <div className="space-y-4">
+             <div className="flex flex-wrap items-center gap-2">
+               <p className="text-ui-base font-medium leading-tight text-foreground-subtle">
+-                {intl.formatMessage({ id: "chat.permission.title" })}
++                {intl.formatMessage({ id: request.reviewFailure ? "chat.permission.autoReviewFailed" : "chat.permission.title" })}
+               </p>
+               <InteractionRequestOriginBadge origin={request.origin} />
+             </div>
+             {!shouldUseSwitchModePlaceholder &&
+             !shouldUseWorkflowBlock &&
+             !shouldUseSaveWorkflowBlock &&
+-            displayReason ? (
++            request.reviewFailure ? (
++              <p className="text-ui-base leading-5 text-foreground" data-testid="auto-review-failure">
++                {request.reviewFailure.code}: {request.reviewFailure.message}
++              </p>
++            ) : displayReason ? (
+               <p className="text-ui-base leading-5 text-foreground">{displayReason}</p>
+             ) : null}
+             {shouldUseSwitchModePlaceholder ? (
+@@ -731,7 +735,7 @@ export function PermissionDialog({
+           <div className="space-y-1">
+             <div
+               role="listbox"
+-              aria-label={intl.formatMessage({ id: "chat.permission.title" })}
++              aria-label={intl.formatMessage({ id: request.reviewFailure ? "chat.permission.autoReviewFailed" : "chat.permission.title" })}
+               className="space-y-1"
+             >
+               {orderedOptions.map((option, index) => {
+diff --git a/packages/ui/src/SettingsPage.tsx b/packages/ui/src/SettingsPage.tsx
+index 554b0d5..39d80a6 100644
+--- a/packages/ui/src/SettingsPage.tsx
++++ b/packages/ui/src/SettingsPage.tsx
+@@ -1838,6 +1838,7 @@ export function SettingsPage({
+                             isDesktop={Boolean(isDesktop)}
+                             isMacDesktop={Boolean(isMacDesktop)}
+                             isWindowsDesktop={Boolean(isWindowsDesktop)}
++                            onManageModels={handleOpenModelProviderSettings}
+                             initialTab={pluginTab}
+                             initialScopeKey={pluginScopeKey}
+                             workspacePath={activeWorkspacePath}
+diff --git a/packages/ui/src/i18n/locales/en-US.ts b/packages/ui/src/i18n/locales/en-US.ts
+index 4ec0bc4..44dfebc 100644
+--- a/packages/ui/src/i18n/locales/en-US.ts
++++ b/packages/ui/src/i18n/locales/en-US.ts
+@@ -4164,6 +4164,11 @@ const enUS: Record<string, string> = {
+   "settings.plugins.marketplace.componentsRetry": "Retry",
+   "settings.plugins.marketplace.componentsEmpty":
+     "This plugin doesn't declare components, or they couldn't be read.",
++  "settings.plugins.reviewModel.invalid": "Invalid review model configuration",
++  "settings.plugins.reviewModel.title": "Review model",
++  "settings.plugins.reviewModel.inherit": "Follow session",
++  "settings.plugins.reviewModel.description":
++    "Applies to the next automatic review. The session model stays unchanged.",
+   "settings.plugins.config.title": "Configuration",
+   "settings.plugins.config.required": "Required",
+   "settings.plugins.config.save": "Save configuration",
+@@ -5786,6 +5791,15 @@ const enUS: Record<string, string> = {
+   "chat.quota.action.refresh": "Refresh quota",
+ 
+   // Permissions
++  "chat.permission.autoReviewAllowed": "Review allowed",
++  "chat.permission.autoReviewDenied": "Review denied",
++  "chat.permission.autoReviewFailedShort": "Review failed",
++  "chat.permission.autoReviewCancelled": "Review cancelled",
++  "chat.permission.reviewProvider": "Provider",
++  "chat.permission.reviewModel": "Model",
++  "chat.permission.reviewReasoning": "Reasoning",
++  "chat.permission.autoReviewing": "Reviewing automatically",
++  "chat.permission.autoReviewFailed": "Automatic review failed; manual confirmation required",
+   "chat.permission.title": "Permission required",
+   "chat.permission.awaitingApproval": "Awaiting approval",
+   "chat.permission.approve": "Allow",
+diff --git a/packages/ui/src/i18n/locales/zh-CN.ts b/packages/ui/src/i18n/locales/zh-CN.ts
+index 63b5482..09a7290 100644
+--- a/packages/ui/src/i18n/locales/zh-CN.ts
++++ b/packages/ui/src/i18n/locales/zh-CN.ts
+@@ -3896,6 +3896,10 @@ const zhCN: Record<string, string> = {
+   "settings.plugins.marketplace.componentsError": "组件清单加载失败，仅展示可得信息。",
+   "settings.plugins.marketplace.componentsRetry": "重试",
+   "settings.plugins.marketplace.componentsEmpty": "该插件未声明组件，或组件无法读取。",
++  "settings.plugins.reviewModel.invalid": "审查模型配置无效，请重新选择或恢复默认",
++  "settings.plugins.reviewModel.title": "审查模型",
++  "settings.plugins.reviewModel.inherit": "跟随会话",
++  "settings.plugins.reviewModel.description": "下一次自动审查生效，不改变主会话模型。",
+   "settings.plugins.config.title": "配置",
+   "settings.plugins.config.required": "必填",
+   "settings.plugins.config.save": "保存配置",
+@@ -5529,6 +5533,15 @@ const zhCN: Record<string, string> = {
+   "chat.quota.action.refresh": "刷新额度",
+ 
+   // 权限请求
++  "chat.permission.autoReviewAllowed": "自动审查通过",
++  "chat.permission.autoReviewDenied": "自动审查拒绝",
++  "chat.permission.autoReviewFailedShort": "自动审查失败",
++  "chat.permission.autoReviewCancelled": "自动审查已取消",
++  "chat.permission.reviewProvider": "供应商",
++  "chat.permission.reviewModel": "模型",
++  "chat.permission.reviewReasoning": "推理档位",
++  "chat.permission.autoReviewing": "正在自动审查",
++  "chat.permission.autoReviewFailed": "自动审查失败，需人工确认",
+   "chat.permission.title": "需要权限",
+   "chat.permission.awaitingApproval": "等待确认",
+   "chat.permission.approve": "允许",
+diff --git a/packages/ui/src/settings/PluginConfigControls.tsx b/packages/ui/src/settings/PluginConfigControls.tsx
+index f552352..82d3c3e 100644
+--- a/packages/ui/src/settings/PluginConfigControls.tsx
++++ b/packages/ui/src/settings/PluginConfigControls.tsx
+@@ -34,7 +34,10 @@ export function PluginConfigControls({
+ }: PluginConfigControlsProps) {
+   const { intl } = useZCodeIntl();
+   const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
+-  const entries = Object.entries(plugin.userConfig ?? {});
++  // Codex 的结构化 reviewModel 由原生模型选择器编辑，不能投影成普通文本输入。
++  const entries = Object.entries(plugin.userConfig ?? {}).filter(
++    ([key]) => key !== "reviewModel" || plugin.id !== "codex-auto-approval@codex-auto-review-local",
++  );
+   if (entries.length === 0) return null;
+ 
+   const isSaving = operationId === `plugin:configure:${plugin.id}`;
+diff --git a/packages/ui/src/settings/PluginsSection.tsx b/packages/ui/src/settings/PluginsSection.tsx
+index 0a71a3b..de8e58d 100644
+--- a/packages/ui/src/settings/PluginsSection.tsx
++++ b/packages/ui/src/settings/PluginsSection.tsx
+@@ -44,6 +44,7 @@ import {
+   PluginHookDetails,
+   PluginWarningList,
+ } from "@/settings/InstalledPluginManagement.js";
++import { CodexReviewModelControls } from "@/settings/CodexReviewModelControls.js";
+ import { PluginConfigControls } from "@/settings/PluginConfigControls.js";
+ import {
+   PluginStoreAdvancedSection,
+@@ -123,6 +124,7 @@ interface PluginsSectionProps {
+   mode?: "plugin" | "mcp" | "skill" | "command";
+   workspacePath?: string | null;
+   workspaceIdentity?: string;
++  onManageModels?: () => void;
+   onCreateTask?: (request?: CreateTaskRequest) => void;
+   onOpenPluginStore: (returnScopeKey?: string, intent?: "add-marketplace") => void;
+   showMarketplaceBreadcrumb?: boolean;
+@@ -140,6 +142,7 @@ function PluginList({
+   isMacDesktop,
+   isWindowsDesktop,
+   onAdd,
++  onManageModels,
+   onCreateTask,
+   onDetailOpenChange,
+   onOpenPluginStore,
+@@ -153,6 +156,7 @@ function PluginList({
+   isMacDesktop: boolean;
+   isWindowsDesktop: boolean;
+   onAdd?: () => void;
++  onManageModels?: () => void;
+   onCreateTask?: (request?: CreateTaskRequest) => void;
+   onDetailOpenChange?: (open: boolean) => void;
+   onOpenPluginStore: (returnScopeKey?: string, intent?: "add-marketplace") => void;
+@@ -413,10 +417,11 @@ function PluginList({
+   ): string | number | boolean => {
+     const draft = pluginOptionsDrafts[plugin.id]?.[key];
+     if (draft === null) return "";
++    const configured = plugin.configuredOptions?.[key];
+     return (
+       draft ??
+-      plugin.configuredOptions?.[key] ??
+-      option.default ??
++      (typeof configured === "object" ? undefined : configured) ??
++      (typeof option.default === "object" ? undefined : option.default) ??
+       (option.type === "boolean" ? false : "")
+     );
+   };
+@@ -720,6 +725,19 @@ function PluginList({
+                 {(selectedPlugin.hookDetails ?? []).length > 0 ? (
+                   <PluginHookDetails hooks={selectedPlugin.hookDetails ?? []} />
+                 ) : null}
++                {selectedPlugin.id === "codex-auto-approval@codex-auto-review-local" ? (
++                  <CodexReviewModelControls
++                    key={`${targetKey}:${configScope}:${selectedPlugin.id}`}
++                    plugin={selectedPlugin}
++                    scope={configScope}
++                    modelService={
++                      (target ? targetServiceResolution.services : baseServices)
++                        .modelSelectionService
++                    }
++                    pluginService={pluginManagementService}
++                    onManageModels={onManageModels}
++                  />
++                ) : null}
+                 <PluginConfigControls
+                   getValue={getPluginOptionValue}
+                   isOptionClearPending={(pluginId, key) =>
+@@ -955,6 +973,7 @@ export function PluginsSection({
+   mode = "plugin",
+   workspacePath,
+   workspaceIdentity,
++  onManageModels,
+   onCreateTask,
+   onOpenPluginStore,
+   showMarketplaceBreadcrumb = false,
+@@ -1291,6 +1310,7 @@ export function PluginsSection({
+               isWindowsDesktop={isWindowsDesktop}
+               searchQuery={searchQueries.plugins}
+               onAdd={selectedScope.kind === "user" ? openPluginStoreForSelectedScope : undefined}
++              onManageModels={onManageModels}
+               onCreateTask={onCreateTask}
+               onDetailOpenChange={setPluginDetailOpen}
+               onOpenPluginStore={openPluginStoreForSelectedScope}
+diff --git a/packages/ui/src/store/pluginManagementStore.ts b/packages/ui/src/store/pluginManagementStore.ts
+index aa2e2ad..badb3ee 100644
+--- a/packages/ui/src/store/pluginManagementStore.ts
++++ b/packages/ui/src/store/pluginManagementStore.ts
+@@ -79,7 +79,7 @@ export interface PluginManagementState {
+   restoreBuiltin: (pluginId: string, pluginService: IPluginManagementService) => Promise<void>;
+   configurePlugin: (
+     pluginId: string,
+-    options: Record<string, string | number | boolean>,
++    options: Parameters<IPluginManagementService["configurePlugin"]>[0]["options"],
+     pluginService: IPluginManagementService,
+     scope?: ZCodePluginScope,
+     clearOptionKeys?: string[],
+diff --git a/packages/ui/src/v4/ConversationAgentToolCallRow.tsx b/packages/ui/src/v4/ConversationAgentToolCallRow.tsx
+index 2e477aa..28f79cf 100644
+--- a/packages/ui/src/v4/ConversationAgentToolCallRow.tsx
++++ b/packages/ui/src/v4/ConversationAgentToolCallRow.tsx
+@@ -1,3 +1,4 @@
++import { PermissionReviewStatus } from "./PermissionReviewStatus.js";
+ import { useCallback, useMemo } from "react";
+ import { TID_V4_ROW, TID_V4_SUBAGENT_OPEN_SIDE_PANE, testId } from "@zcode/shared";
+ import { ToolCallBlock } from "@/ToolCallBlocks.js";
+@@ -79,6 +80,7 @@ export function ConversationAgentToolCallRow({
+       data-conversation-selectable="true"
+       data-testid={testId(TID_V4_ROW, String(item.row.rowId))}
+     >
++      <PermissionReviewStatus row={item.row} />
+       <ToolCallBlock
+         toolCallNode={toolCallNode}
+         workspacePath={context.workspacePath}
 diff --git a/packages/ui/src/v4/ConversationComposer.tsx b/packages/ui/src/v4/ConversationComposer.tsx
 index 913ae0d..eb0f0ea 100644
 --- a/packages/ui/src/v4/ConversationComposer.tsx
@@ -493,6 +1640,23 @@ index 913ae0d..eb0f0ea 100644
            provider={provider}
            draftConfig={draftConfig}
            disabled={disabled}
+diff --git a/packages/ui/src/v4/ConversationRowView.tsx b/packages/ui/src/v4/ConversationRowView.tsx
+index 3827166..c9aabf5 100644
+--- a/packages/ui/src/v4/ConversationRowView.tsx
++++ b/packages/ui/src/v4/ConversationRowView.tsx
+@@ -1,3 +1,4 @@
++import { PermissionReviewStatus } from "./PermissionReviewStatus.js";
+ /* oxlint-disable eslint(max-lines) -- v4 逐行 row 渲染分发集中收口（每种 row 一个 memo 叶子 + timelineMarker 分隔线），拆分会打散行类型对照。 */
+ import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
+ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+@@ -1987,6 +1988,7 @@ const ToolCallRowView = memo(function ToolCallRowView({
+   return (
+     <RowShell rowId={row.rowId} className="py-0">
+       <div data-conversation-selectable="true">
++        <PermissionReviewStatus row={row} />
+         <ToolCallBlock
+           toolCallNode={toolCallNode}
+           workspacePath={context.workspacePath}
 diff --git a/packages/ui/src/v4/composer/V4ComposerModeControls.tsx b/packages/ui/src/v4/composer/V4ComposerModeControls.tsx
 index 0676cf3..626114b 100644
 --- a/packages/ui/src/v4/composer/V4ComposerModeControls.tsx
@@ -675,23 +1839,39 @@ index 0676cf3..626114b 100644
          </DropdownMenuContent>
        </DropdownMenu>
        {draftConfig?.planEnabled && (
+diff --git a/packages/ui/src/v4/pendingInteractionAdapter.ts b/packages/ui/src/v4/pendingInteractionAdapter.ts
+index 5054742..7ff6c29 100644
+--- a/packages/ui/src/v4/pendingInteractionAdapter.ts
++++ b/packages/ui/src/v4/pendingInteractionAdapter.ts
+@@ -76,6 +76,7 @@ export function pendingPermissionToLegacyRequest(
+     traceId: sessionId,
+     requestId: interaction.interactionId,
+     description: payload.summary,
++    ...(payload.reviewFailure ? { reviewFailure: payload.reviewFailure } : {}),
+     kind: payload.toolName,
+     title: payload.toolName,
+     options,
 diff --git a/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts b/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts
 new file mode 100755
-index 0000000..f5d4424
+index 0000000..0a51e67
 --- /dev/null
 +++ b/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,201 @@
 +import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 +import { chmod, mkdtemp, rm } from "node:fs/promises";
 +import { createServer, type Socket } from "node:net";
 +import { tmpdir } from "node:os";
 +import { join } from "node:path";
++import { approvalReviewFailure } from "@zcode/contracts";
 +import type { ApprovalBridgeFactory, ApprovalBridgeOwner, ApprovalBridgePort, HookPluginContext, HookJSONOutput } from "@zcode/contracts";
++
++import { classifyModelFailure, inspectProviderFailure } from "../model/failure-classifier.js";
++import { getResponseHeaders } from "../model/failure-inspection.js";
 +
 +const MAX_FRAME = 2 * 1024 * 1024;
 +const signature = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-+const ask = (message: string): HookJSONOutput => ({
-+  hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "ask", message } },
++const ask = (message: string, failure = approvalReviewFailure({ message })): HookJSONOutput => ({
++  hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "ask", message: failure.message, reviewFailure: failure } },
 +});
 +const fault = (code: string, message: string) => Object.assign(new Error(message), { code });
 +
@@ -703,13 +1883,20 @@ index 0000000..f5d4424
 +
 +function createBridge(owner: ApprovalBridgeOwner, isActive: (plugin?: HookPluginContext) => boolean): ApprovalBridgePort {
 +  const attempts = new Map<string, number>();
++  const invokedModels = new Map<string, import("@zcode/contracts").ModelSelection>();
 +  return {
-+  async open(input, signal, plugin) {
++  isActive,
++  reviewModel(plugin, requestId) {
++    if (requestId) return invokedModels.get(requestId);
++    try { return (owner.snapshot(plugin) as { actualReviewSelection?: import("@zcode/contracts").ModelSelection }).actualReviewSelection; }
++    catch { return undefined; }
++  },
++  async open(input, signal, plugin, onReviewModel) {
 +    input = structuredClone(input);
 +    signal?.throwIfAborted();
 +    const active = () => isActive(plugin);
 +    if (!active()) throw fault("plugin_disabled", "Approval plugin is disabled or uninstalled");
-+    let snapshot = structuredClone(owner.snapshot());
++    let snapshot = structuredClone(owner.snapshot(plugin));
 +    const directory = process.platform === "win32" ? undefined : await mkdtemp(join(tmpdir(), "zcode-review-"));
 +    const address = directory ? join(directory, "bridge.sock") : `\\\\.\\pipe\\zcode-review-${randomUUID()}`;
 +    const token = randomBytes(32).toString("hex");
@@ -720,7 +1907,11 @@ index 0000000..f5d4424
 +    const connections = new Set<Socket>();
 +    let bindingId = signature({ input, snapshot, nonce: randomUUID() });
 +    let finished = false, closed = false, busy = false;
-+    const current = () => !liveSignal.aborted && active() && signature(snapshot) === signature(owner.snapshot());
++    const current = () => {
++      try { return !liveSignal.aborted && active() && signature(snapshot) === signature(owner.snapshot(plugin)); }
++      catch { return false; }
++    };
++    const clear = () => owner.clearContinuation?.(bindingId);
 +    const server = createServer(socket => {
 +      connections.add(socket);
 +      socket.once("close", () => connections.delete(socket));
@@ -740,6 +1931,7 @@ index 0000000..f5d4424
 +    const close = async () => {
 +      if (closed) return;
 +      closed = true;
++      clear();
 +      clearTimeout(timeout);
 +      controller.abort(fault("cancelled", "Approval lease closed"));
 +      liveSignal.removeEventListener("abort", onAbort);
@@ -762,7 +1954,8 @@ index 0000000..f5d4424
 +        let result: unknown;
 +        if (request.method === "context/read") {
 +          if (busy) throw fault("busy", "A completion is already in progress");
-+          snapshot = structuredClone(owner.snapshot());
++          clear();
++          snapshot = structuredClone(owner.snapshot(plugin));
 +          bindingId = signature({ input, snapshot, nonce: randomUUID() });
 +          const context = snapshot as Record<string, unknown>;
 +          result = { ...context, sessionId: input.sessionId, turnId: input.turnId, requestId: input.requestId,
@@ -775,6 +1968,7 @@ index 0000000..f5d4424
 +          const messages = request.params?.messages;
 +          if (Array.isArray(messages) && messages.length === 2) {
 +            const count = (attempts.get(input.requestId) ?? 0) + 1;
++            clear();
 +            attempts.set(input.requestId, count);
 +            if (attempts.size > 50) attempts.delete(attempts.keys().next().value!);
 +            if (count > 3) throw fault("attempt_budget", "Automatic review exhausted its three attempts");
@@ -787,17 +1981,31 @@ index 0000000..f5d4424
 +            else if (!current()) completionController.abort(fault("stale_context", "Approval context changed during completion"));
 +          }, 100);
 +          try {
-+            result = await completeWithCancellation(() => owner.complete(request.params, completionSignal), completionSignal);
++            const reviewSelection = (snapshot as { actualReviewSelection?: import("@zcode/contracts").ModelSelection }).actualReviewSelection;
++            if (reviewSelection) {
++              invokedModels.set(input.requestId, structuredClone(reviewSelection));
++              if (invokedModels.size > 50) invokedModels.delete(invokedModels.keys().next().value!);
++              await onReviewModel?.(reviewSelection);
++            }
++            result = await completeWithCancellation(() => owner.complete(request.params, completionSignal, input, { bindingId, attempt: attempts.get(input.requestId) ?? 1, reviewSelection: (snapshot as { actualReviewSelection?: import("@zcode/contracts").ModelSelection }).actualReviewSelection }), completionSignal);
 +            completionSignal.throwIfAborted();
 +            liveSignal.throwIfAborted();
 +            if (!current()) throw fault("stale_context", "Approval context changed during completion");
-+          } finally { clearInterval(watch); busy = false; }
++          } catch (error) { clear(); throw error; } finally { clearInterval(watch); busy = false; }
 +        } else throw fault("method", "Unknown approval bridge method");
 +        if (Buffer.byteLength(JSON.stringify(result)) > MAX_FRAME) throw fault("input_budget", "Approval reply exceeds budget");
 +        return { id, result };
 +      } catch (error) {
 +        const e = error as Error & { code?: string; retryable?: boolean };
-+        return { id, error: { code: e.code ?? "model_error", message: e.message, retryable: e.retryable === true } };
++        const classified = classifyModelFailure(e);
++        const details = inspectProviderFailure(e);
++        const headers = getResponseHeaders(e);
++        return { id, error: approvalReviewFailure({ ...e, code: e.code, name: e.name, message: e.message,
++          businessCode: details.providerErrorCode ?? (e as { businessCode?: string }).businessCode,
++          httpStatus: classified.statusCode ?? (e as { httpStatus?: number }).httpStatus,
++          requestId: details.providerRequestId ?? headers?.["x-request-id"] ?? headers?.["request-id"] ?? (e as { requestId?: string }).requestId,
++          retryAfterMs: classified.retryAfterMs ?? (e as { retryAfterMs?: number }).retryAfterMs,
++          retryable: e.retryable ?? classified.retryable }) };
 +      }
 +    }
 +    try {
@@ -810,22 +2018,28 @@ index 0000000..f5d4424
 +      liveSignal.throwIfAborted();
 +    } catch (error) { await close(); throw error; }
 +    return {
-+      env: { ZCODE_APPROVAL_BRIDGE_SOCKET: address, ZCODE_APPROVAL_BRIDGE_TOKEN: token, ZCODE_APPROVAL_BRIDGE_VERSION: "1" },
++      env: { ZCODE_APPROVAL_BRIDGE_SOCKET: address, ZCODE_APPROVAL_BRIDGE_TOKEN: token, ZCODE_APPROVAL_BRIDGE_VERSION: "2" },
 +      finish(output) {
 +        if (finished || closed || liveSignal.aborted) return ask("Approval cancelled or expired");
 +        const specific = output?.hookSpecificOutput;
 +        if (specific?.hookEventName !== "PermissionRequest" || !specific.decision) return ask("Automatic review returned no decision");
 +        const decision = specific.decision;
-+        if (decision.behavior === "ask") return ask(decision.message ?? "Automatic review needs manual approval");
-+        if (!current() || decision.bindingId !== bindingId) return ask("STALE_CONTEXT: approval snapshot expired");
++        if (decision.behavior === "ask") return ask(decision.message ?? "Automatic review needs manual approval", decision.reviewFailure);
++        if (!current() || decision.bindingId !== bindingId) return ask("STALE_CONTEXT: approval snapshot expired", { code: "stale_context", message: "STALE_CONTEXT: approval snapshot expired" });
 +        const assessment = decision.assessment;
 +        if (!assessment || assessment.outcome !== decision.behavior) return ask("Automatic review assessment is invalid");
++        clear();
 +        finished = true;
 +        const interrupt = owner.record(decision.behavior, assessment, input);
++        const actualReviewModel = (snapshot as { actualReviewSelection?: import("@zcode/contracts").ModelSelection }).actualReviewSelection;
++        const isStillCurrent = () => {
++          try { return !signal?.aborted && active() && signature(snapshot) === signature(owner.snapshot(plugin)); }
++          catch { return false; }
++        };
 +        // Ignore plugin permission updates, modified arguments and interrupt flags.
 +        return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: decision.behavior === "allow"
-+          ? { behavior: "allow" }
-+          : { behavior: "deny", interrupt, message: decision.message ?? assessment.rationale } } };
++          ? { behavior: "allow", ...(actualReviewModel ? { actualReviewModel, isStillCurrent } : {}) }
++          : { behavior: "deny", ...(actualReviewModel ? { actualReviewModel } : {}), interrupt, message: decision.message ?? assessment.rationale } } };
 +      },
 +      close,
 +    };
@@ -846,18 +2060,23 @@ index 0000000..f5d4424
 +}
 diff --git a/apps/zcode-cli/packages/adapters/src/exec/approval-plugin-activity.ts b/apps/zcode-cli/packages/adapters/src/exec/approval-plugin-activity.ts
 new file mode 100755
-index 0000000..57134be
+index 0000000..e946393
 --- /dev/null
 +++ b/apps/zcode-cli/packages/adapters/src/exec/approval-plugin-activity.ts
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,58 @@
 +import { existsSync } from "node:fs";
-+import type { ApprovalBridgeFactory } from "@zcode/contracts";
++import { createHash, randomUUID } from "node:crypto";
++import { reviewModelSelectionSchema, type ApprovalBridgeFactory, type ModelSelection } from "@zcode/contracts";
 +import { loadFileConfig } from "../config/index.js";
 +import { createNodeApprovalBridgeWithActivity } from "./approval-bridge.js";
 +
 +/** Read the same native config parser used by plugin enable/disable commands. */
-+export function createConfiguredNodeApprovalBridge(configPaths: string[]): ApprovalBridgeFactory {
-+  return createNodeApprovalBridgeWithActivity(plugin => {
++export function createConfiguredNodeApprovalBridge(configPaths: string[], native?: {
++  configurationVersion(): number;
++  validateSelection(selection: ModelSelection): { ok: true } | { ok: false; code: string; message?: string };
++}): ApprovalBridgeFactory {
++  let previousFingerprint = "", revision = randomUUID();
++  const factory = createNodeApprovalBridgeWithActivity(plugin => {
 +    if (!plugin) return true;
 +    if (!existsSync(plugin.rootPath)) return false;
 +    let enabled = true;
@@ -866,19 +2085,197 @@ index 0000000..57134be
 +    for (const file of configPaths) {
 +      if (!existsSync(file)) continue;
 +      const loaded = loadFileConfig(file);
-+      if (loaded.diagnostics.some(item => item.severity === "error")) return false;
++      // 选择配置损坏应由 snapshot 返回具体技术失败，不能被误当成用户停用。
 +      enabled = loaded.config.plugins?.enabled ?? enabled;
 +      pluginEnabled = loaded.config.plugins?.enabledPlugins?.[plugin.id] ?? pluginEnabled;
 +    }
 +    return enabled && pluginEnabled;
 +  });
++  return owner => factory({
++    ...owner,
++    snapshot(plugin) {
++      const snapshot = owner.snapshot(plugin) as Record<string, unknown>;
++      let option: unknown;
++      const configurations = configPaths.map(file => {
++        if (!existsSync(file)) return undefined;
++        const loaded = loadFileConfig(file);
++        if (loaded.diagnostics.some(item => item.severity === "error")) {
++          throw Object.assign(new Error("Automatic review configuration is invalid"), { code: "review_configuration_invalid" });
++        }
++        const options = loaded.config.plugins?.options;
++        const id = plugin?.id;
++        const configured = id ? options?.[id]?.reviewModel : undefined;
++        if (configured !== undefined) option = configured;
++        return loaded.config;
++      });
++      const selection = reviewModelSelectionSchema.safeParse(option ?? { mode: "inherit" });
++      if (!selection.success) throw Object.assign(new Error("Automatic review model configuration is invalid"), { code: "review_configuration_invalid" });
++      const actualReviewSelection = selection.data.mode === "inherit" ? snapshot.modelSnapshot as ModelSelection : {
++        providerId: selection.data.providerId, modelId: selection.data.modelId, ...("options" in selection.data ? { options: selection.data.options } : {}),
++      };
++      const validation = native?.validateSelection(actualReviewSelection);
++      if (validation && !validation.ok) throw Object.assign(new Error(validation.message ?? "Configured review model is unavailable or incompatible"), { code: `review_${validation.code.replaceAll("-", "_")}` });
++      // 配置摘要仅在宿主持有；对插件暴露随机版本，不能用凭据摘要作为可关联的标识。
++      const fingerprint = createHash("sha256").update(JSON.stringify({ configurations, native: native?.configurationVersion() })).digest("hex");
++      if (fingerprint !== previousFingerprint) { previousFingerprint = fingerprint; revision = randomUUID(); }
++      return { ...snapshot, actualReviewSelection, reviewConfigurationVersion: revision };
++    },
++  });
 +}
+diff --git a/apps/zcode-cli/packages/bootstrap/src/app/approval-review-selection.ts b/apps/zcode-cli/packages/bootstrap/src/app/approval-review-selection.ts
+new file mode 100755
+index 0000000..6828379
+--- /dev/null
++++ b/apps/zcode-cli/packages/bootstrap/src/app/approval-review-selection.ts
+@@ -0,0 +1,26 @@
++import type { ModelSelection } from "@zcode/provider";
++import type { ProviderRegistryModelSource } from "./provider-registry-model-runtime.js";
++
++/** Native resolver diagnostics are inspected in the host; config/keys never enter bridge errors. */
++export function validateApprovalReviewSelection(registry: ProviderRegistryModelSource, selection: ModelSelection):
++  { ok: true } | { ok: false; code: string; message: string } {
++  const result = registry.validateSelection(selection);
++  if (result.ok) {
++    return registry.getModel(selection.providerId, selection.modelId)?.config.properties.supportsToolCall
++      ? { ok: true } : { ok: false, code: "model_incompatible", message: "Configured review model does not support read-only tool investigation" };
++  }
++  if (result.code === "provider-not-found") {
++    const candidate = registry.getSnapshot?.()?.resolution.resolvedProviders.find(provider => provider.providerId === selection.providerId);
++    if (candidate?.providerIssues.some(issue => issue.path.slice(-2).join(".") === "access.apiKey")) {
++      return { ok: false, code: "credentials_missing", message: "Configured review provider is missing its native API key" };
++    }
++    if (candidate) return { ok: false, code: "provider_incompatible", message: "Configured review provider is disabled or its native configuration is incomplete" };
++    return { ok: false, code: "provider_not_found", message: "Configured review provider was deleted or is unavailable" };
++  }
++  const messages = {
++    "model-not-found": "Configured review model was deleted, disabled or has incomplete native configuration",
++    "reasoning-level-missing": "Configured review model requires a reasoning level",
++    "reasoning-level-not-supported": "Configured review reasoning level is not supported by this model",
++  };
++  return { ok: false, code: result.code.replaceAll("-", "_"), message: messages[result.code] };
++}
+diff --git a/apps/zcode-cli/packages/bootstrap/src/plugins/review-model-options.ts b/apps/zcode-cli/packages/bootstrap/src/plugins/review-model-options.ts
+new file mode 100755
+index 0000000..2eae188
+--- /dev/null
++++ b/apps/zcode-cli/packages/bootstrap/src/plugins/review-model-options.ts
+@@ -0,0 +1,15 @@
++import { reviewModelSelectionSchema, type PluginOptionValues } from "@zcode/contracts/plugins";
++
++/** Native configure admission owns validation; references never carry credentials. */
++export function normalizePluginOptions(options: Record<string, unknown>, pluginId: string): PluginOptionValues {
++  const result: PluginOptionValues = {};
++  for (const [key, value] of Object.entries(options)) {
++    // 审查模型只接受引用，不允许对象配置偷偷复制 URL、协议或凭据。
++    if (key === "reviewModel" && pluginId === "codex-auto-approval@codex-auto-review-local") {
++      result[key] = reviewModelSelectionSchema.parse(value);
++      continue;
++    }
++    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") result[key] = value;
++  }
++  return result;
++}
+diff --git a/apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection-permission-review.ts b/apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection-permission-review.ts
+new file mode 100755
+index 0000000..ca9df28
+--- /dev/null
++++ b/apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection-permission-review.ts
+@@ -0,0 +1,15 @@
++import type { PermissionReviewPayload, SessionEvent } from "@zcode/contracts";
++import { SessionEventType } from "@zcode/contracts";
++import type { ConversationDelta, ToolCallRow } from "@zcode/shared/zcode-protocol-v4";
++
++/** Derived live/replay state only. The runtime owns admission and the review lease. */
++export function projectPermissionReview(event: SessionEvent, row?: ToolCallRow): ConversationDelta[] {
++  if (!row || ["success", "error", "cancelled"].includes(row.status)) return [];
++  const payload = event.payload as PermissionReviewPayload;
++  const started = event.type === SessionEventType.PermissionReviewStarted;
++  if (!started && row.permissionReview?.requestId !== payload.requestId) return [];
++  return [{ op: "row.upserted", row: { ...row,
++    permissionReview: { actualReviewModel: payload.actualReviewModel, requestId: payload.requestId, status: started ? "reviewing" : payload.outcome ?? "failed",
++      ...(payload.reviewFailure ? { reviewFailure: payload.reviewFailure } : {}) },
++  } }];
++}
+diff --git a/apps/zcode-cli/packages/bootstrap/test/approval-review-selection.test.ts b/apps/zcode-cli/packages/bootstrap/test/approval-review-selection.test.ts
+new file mode 100755
+index 0000000..64914c4
+--- /dev/null
++++ b/apps/zcode-cli/packages/bootstrap/test/approval-review-selection.test.ts
+@@ -0,0 +1,42 @@
++import assert from "node:assert/strict";
++import { test } from "node:test";
++import { ApiKeyAccessConfig, ModelConfig, ModelConfigRules, ProviderApiConfig, ProviderConfig, ProviderConfigMap,
++  ProviderRegistryService, ProviderTemplateMap } from "@zcode/provider";
++import { validateApprovalReviewSelection } from "../src/app/approval-review-selection.js";
++
++test("real native resolver distinguishes missing credentials from deleted provider and model", async () => {
++  const providers = new ProviderConfigMap([
++    ["missing-key", new ProviderConfig({ group: "standard-personal", access: new ApiKeyAccessConfig(),
++      api: new ProviderApiConfig({ type: "openai-chat-completions", baseUrl: "https://private.invalid/v1" }) })],
++    ["valid-provider", new ProviderConfig({ group: "standard-personal", access: new ApiKeyAccessConfig({ apiKey: "test-private-sentinel" }),
++      api: new ProviderApiConfig({ type: "anthropic-messages", baseUrl: "https://private.invalid" }), personalModelIds: ["review"] })],
++  ]);
++  const config = { revision: "test", zcodeBuiltinRevision: "test", personalRevision: "test",
++    zcodeBuiltinProviders: ProviderConfigMap.empty(), zcodeBuiltinProviderTemplates: ProviderTemplateMap.empty(),
++    personalProviders: providers, zcodeBuiltinModelRules: new ModelConfigRules(), personalModels: new ModelConfigRules([
++      { type: "provider-model", providerId: "valid-provider", modelId: "review", config: ModelConfig.fromData({ enabled: true,
++        properties: { contextWindow: 20000, requiresMfjsToolSchema: false, supportsToolCall: true, supportsJsonSchemaOutput: false,
++          supportsNativeWebSearch: false, supportsMidConversationSystem: true,
++          inputFormat: { supportsText: true, supportsImage: false, supportsVideo: false, supportsAudio: false, supportsPdf: false }, outputFormat: { supportsText: true } },
++        optionSpecs: { reasoningLevel: { values: ["high"], map: "{}" }, maxOutputTokens: { max: 4096, map: "{}" } } }) },
++    ]) };
++  const registry = new ProviderRegistryService({
++    configSource: { read: async () => config, onDidChange: () => () => {} },
++    accountSource: { read: async () => ({ revision: "test", basedOnZCodeBuiltinRevision: "test", providers: ProviderConfigMap.empty() }), onDidChange: () => () => {} },
++  });
++  await registry.start();
++  try {
++    assert.equal(registry.getProvider("missing-key"), undefined);
++    assert.ok(registry.getProvider("valid-provider"));
++    for (const [providerId, code] of [["missing-key", "credentials_missing"], ["deleted", "provider_not_found"], ["valid-provider", "model_not_found"]]) {
++      const result = validateApprovalReviewSelection(registry, { providerId, modelId: "deleted-model" });
++      assert.equal(result.ok, false);
++      if (!result.ok) assert.equal(result.code, code);
++      assert.doesNotMatch(JSON.stringify(result), /test-private-sentinel|private\.invalid|apiKey/);
++    }
++    assert.equal(validateApprovalReviewSelection(registry, { providerId: "valid-provider", modelId: "review", options: { reasoningLevel: "high" } }).ok, true);
++    const incompatible = validateApprovalReviewSelection(registry, { providerId: "valid-provider", modelId: "review", options: { reasoningLevel: "unsupported" } });
++    assert.equal(incompatible.ok, false);
++    if (!incompatible.ok) assert.equal(incompatible.code, "reasoning_level_not_supported");
++  } finally { registry.dispose(); }
++});
+diff --git a/apps/zcode-cli/packages/bootstrap/test/review-model-options.test.ts b/apps/zcode-cli/packages/bootstrap/test/review-model-options.test.ts
+new file mode 100755
+index 0000000..ad20d27
+--- /dev/null
++++ b/apps/zcode-cli/packages/bootstrap/test/review-model-options.test.ts
+@@ -0,0 +1,20 @@
++import assert from "node:assert/strict";
++import { test } from "node:test";
++import { normalizePluginOptions } from "../src/plugins/review-model-options.js";
++const pluginId = "codex-auto-approval@codex-auto-review-local";
++test("configure preserves references and reasoning while retaining ordinary options", () => {
++  const reviewModel = { mode: "specified", providerId: "custom-provider", modelId: "deepseek-flash", options: { reasoningLevel: "high" } };
++  assert.deepEqual(normalizePluginOptions({ reviewModel, enabled: true }, pluginId), { reviewModel, enabled: true });
++  assert.deepEqual(normalizePluginOptions({ reviewModel: { mode: "inherit" } }, pluginId), { reviewModel: { mode: "inherit" } });
++  assert.deepEqual(normalizePluginOptions({}, pluginId), {});
++});
++test("configure rejects malformed selections and credential or protocol copies", () => {
++  for (const reviewModel of ["inherit", { mode: "specified" }, { mode: "inherit", apiKey: "secret" },
++    { mode: "specified", providerId: "p", modelId: "m", baseUrl: "https://example.invalid" },
++    { mode: "specified", providerId: "p", modelId: "m", options: { reasoningLevel: "high", protocol: "responses" } }]) {
++    assert.throws(() => normalizePluginOptions({ reviewModel }, pluginId));
++  }
++});
++test("object options cannot become a second arbitrary plugin configuration channel", () => {
++  assert.deepEqual(normalizePluginOptions({ reviewModel: { mode: "inherit" } }, "another-plugin"), {});
++});
 diff --git a/apps/zcode-cli/packages/contracts/src/hooks/approval-assessment.ts b/apps/zcode-cli/packages/contracts/src/hooks/approval-assessment.ts
 new file mode 100755
-index 0000000..803b19b
+index 0000000..8a8eedd
 --- /dev/null
 +++ b/apps/zcode-cli/packages/contracts/src/hooks/approval-assessment.ts
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,49 @@
 +import { z } from "zod";
 +
 +export const ApprovalAssessmentSchema = z.object({
@@ -890,22 +2287,65 @@ index 0000000..803b19b
 +
 +export type ApprovalAssessment = z.infer<typeof ApprovalAssessmentSchema>;
 +
++export const ApprovalReviewFailureSchema = z.object({
++  code: z.string().max(80), message: z.string().max(2000),
++  businessCode: z.string().max(80).optional(), httpStatus: z.number().int().min(100).max(599).optional(),
++  requestId: z.string().max(160).optional(), retryAfterMs: z.number().int().min(0).max(90000).optional(),
++  retryable: z.boolean().optional(),
++});
++export type ApprovalReviewFailure = z.infer<typeof ApprovalReviewFailureSchema>;
++
++/** Provider exceptions can contain headers/bodies: expose only a bounded redacted message. */
++export function approvalReviewFailure(error: unknown): ApprovalReviewFailure {
++  const value = error as { code?: string; name?: string; message?: string; businessCode?: string; providerCode?: string | number;
++    httpStatus?: number; statusCode?: number; responseStatus?: number; requestId?: string; providerRequestId?: string;
++    retryAfterMs?: number; retryable?: boolean; isRetryable?: boolean } | undefined;
++  const code = value?.name === "ProviderBusinessError" ? "provider_business_error" : value?.code ?? (value?.name === "TimeoutError" ? "timeout" : "review_error");
++  const redact = (field: unknown) => String(field)
++    .replace(/\bsk-[a-zA-Z0-9_-]+/g, "[redacted]")
++    .replace(/(?:Bearer\s+)[^\s,;]+/gi, "Bearer [redacted]")
++    .replace(/((?:api[_-]?key|authorization|token|password|secret)[\s"']*[:=][\s"']*)[^\s"',;}]+/gi, "$1[redacted]")
++    .replace(/https?:\/\/[^\s]+/gi, "[endpoint]")
++    .split("\n")[0]!;
++  const message = redact(value?.message ?? "Automatic review unavailable").slice(0, 2000);
++  const safeId = (field: unknown, limit: number) => redact(field).replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, limit);
++  const businessCode = value?.businessCode ?? value?.providerCode;
++  const httpStatus = value?.httpStatus ?? value?.responseStatus ?? value?.statusCode;
++  const requestId = value?.requestId ?? value?.providerRequestId;
++  return { code: safeId(code, 80), message,
++    ...(businessCode !== undefined ? { businessCode: safeId(businessCode, 80) } : {}),
++    ...(Number.isInteger(httpStatus) && httpStatus! >= 100 && httpStatus! <= 599 ? { httpStatus } : {}),
++    ...(requestId ? { requestId: safeId(requestId, 160) } : {}),
++    ...(Number.isFinite(value?.retryAfterMs) ? { retryAfterMs: Math.min(90000, Math.max(0, Math.floor(value!.retryAfterMs!))) } : {}),
++    retryable: value?.name !== "ProviderBusinessError" && (value?.retryable === true || value?.isRetryable === true),
++  };
++}
++
 +export const approvalBindingFields = {
 +  bindingId: z.string().optional(),
 +  assessment: ApprovalAssessmentSchema.optional(),
 +};
 diff --git a/apps/zcode-cli/packages/contracts/src/interfaces/approval-bridge.port.ts b/apps/zcode-cli/packages/contracts/src/interfaces/approval-bridge.port.ts
 new file mode 100755
-index 0000000..fc36e2a
+index 0000000..df76065
 --- /dev/null
 +++ b/apps/zcode-cli/packages/contracts/src/interfaces/approval-bridge.port.ts
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,33 @@
 +import type { HookJSONOutput, PermissionRequestHookInput, HookPluginContext } from "../hooks/index.js";
++import type { ModelSelection } from "../model/index.js";
++
++export interface ApprovalReviewBindingContext {
++  bindingId: string;
++  attempt: number;
++  reviewSelection?: ModelSelection;
++}
 +
 +/** Native credentials and model handles never cross this boundary. */
 +export interface ApprovalBridgeOwner {
-+  snapshot(): unknown;
-+  complete(params: unknown, signal: AbortSignal): Promise<unknown>;
++  snapshot(plugin?: HookPluginContext): unknown;
++  complete(params: unknown, signal: AbortSignal, input: PermissionRequestHookInput, context?: ApprovalReviewBindingContext): Promise<unknown>;
++  /** Lease lifecycle owns cleanup even when no successful completion/decision occurs. */
++  clearContinuation?(bindingId: string): void;
 +  record(outcome: "allow" | "deny", assessment: unknown, input: PermissionRequestHookInput): boolean;
 +}
 +
@@ -916,27 +2356,52 @@ index 0000000..fc36e2a
 +}
 +
 +export interface ApprovalBridgePort {
-+  open(input: PermissionRequestHookInput, signal?: AbortSignal, plugin?: HookPluginContext): Promise<ApprovalBridgeLease>;
++  reviewModel?: (plugin?: HookPluginContext, requestId?: string) => ModelSelection | undefined;
++  /** The loaded catalog may survive a disable; read current native activity before review admission. */
++  isActive?: (plugin?: HookPluginContext) => boolean;
++  open(input: PermissionRequestHookInput, signal?: AbortSignal, plugin?: HookPluginContext,
++    onReviewModel?: (selection: ModelSelection) => Promise<void>): Promise<ApprovalBridgeLease>;
 +}
 +
 +export type ApprovalBridgeFactory = (owner: ApprovalBridgeOwner) => ApprovalBridgePort;
+diff --git a/apps/zcode-cli/packages/contracts/src/plugins/review-model.ts b/apps/zcode-cli/packages/contracts/src/plugins/review-model.ts
+new file mode 100755
+index 0000000..2e10c2b
+--- /dev/null
++++ b/apps/zcode-cli/packages/contracts/src/plugins/review-model.ts
+@@ -0,0 +1,13 @@
++import { z } from "zod";
++
++/** References only: native provider management remains the credential owner. */
++export const reviewModelSelectionSchema = z.discriminatedUnion("mode", [
++  z.object({ mode: z.literal("inherit") }).strict(),
++  z.object({
++    mode: z.literal("specified"),
++    providerId: z.string().trim().min(1).max(200),
++    modelId: z.string().trim().min(1).max(200),
++    options: z.object({ reasoningLevel: z.string().trim().min(1).max(80) }).strict().optional(),
++  }).strict(),
++]);
++export type ReviewModelSelection = z.infer<typeof reviewModelSelectionSchema>;
 diff --git a/apps/zcode-cli/packages/core/src/runtime/helpers/approval-bridge.ts b/apps/zcode-cli/packages/core/src/runtime/helpers/approval-bridge.ts
 new file mode 100755
-index 0000000..c634b3c
+index 0000000..35b6862
 --- /dev/null
 +++ b/apps/zcode-cli/packages/core/src/runtime/helpers/approval-bridge.ts
-@@ -0,0 +1,90 @@
-+import type { ApprovalBridgeFactory, ApprovalBridgePort, ModelInputMessage, ModelToolContract } from "@zcode/contracts";
-+import { ModelRetryBudget } from "@zcode/contracts";
+@@ -0,0 +1,148 @@
++import type { ApprovalBridgeFactory, ApprovalBridgePort, ModelInputMessage, ModelToolContract, ModelReasoningContentBlock } from "@zcode/contracts";
++import { approvalReviewFailure, createChildTraceContext, runWithModelInvocationContext, traceContextToLogContext, ModelRetryBudget } from "@zcode/contracts";
 +import type { AgentRuntimeInternal } from "../internal.js";
 +import { createTurnModel } from "../methods/turn-model.js";
 +import { ProviderEntryOrigins } from "./provider-entry-origins.js";
++
++import { ApprovalContinuation, mergeReasoningMetadata } from "./approval-continuation.js";
 +
 +const REVIEW_MAX_OUTPUT_TOKENS = 8192;
 +
 +function visibleMessage(message: ModelInputMessage) {
 +  return { role: message.role,
-+    content: typeof message.content === "string" ? message.content : message.content.filter(block => block.type === "text"),
++    content: typeof message.content === "string" ? message.content : message.content.filter(block => block.type === "text").map(block => ({ type: "text", text: block.text })),
 +    ...(message.toolCalls ? { tool_calls: message.toolCalls.map(call => ({ id: call.id,
 +      type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } })) } : {}),
 +    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}) };
@@ -949,7 +2414,9 @@ index 0000000..c634b3c
 +  let window: boolean[] = [];
 +  let denials: unknown[] = [];
 +  let interrupted = false;
++  const continuation = new ApprovalContinuation();
 +  const port = factory({
++    clearContinuation: bindingId => continuation.clear(bindingId),
 +    snapshot() {
 +      const entries = runtime.messageHistory.borrowReadOnlyRuntimeEntries()
 +        .filter(entry => entry.kind !== "attachment");
@@ -959,20 +2426,21 @@ index 0000000..c634b3c
 +        .map(entry => visibleMessage(entry.message).content);
 +      const selection = runtime.getSessionModelSelection();
 +      if (!selection) throw new Error("Select a desktop model before automatic review");
-+      return { workspace: runtime.workingDirectory, modelSnapshot: selection,
++      return { workspace: runtime.workingDirectory, workspaceIdentity: runtime.config.workspaceIdentity?.trim() || runtime.config.memory?.workspaceIdentity?.trim() || runtime.workingDirectory, modelSnapshot: selection,
 +        branchGeneration: runtime.branchGeneration, mode: runtime.config.mode,
 +        sessionId: runtime.sessionId, turnId, interrupted,
 +        state: { userMessages, messages: messages.slice(-24), denials } };
 +    },
-+    async complete(params, signal) {
++    async complete(params, signal, input, binding) {
 +      signal.throwIfAborted();
 +      if (interrupted) throw new Error("Approval circuit breaker stopped this turn");
 +      const request = params as { messages?: unknown[]; tools?: { name: string; description: string; parameters: unknown }[] };
 +      if (!Array.isArray(request.messages) || JSON.stringify(request.messages).length > 180000) throw new Error("Approval input budget exceeded");
-+      if (!Array.isArray(request.tools) || request.tools.length !== 2 || request.tools.some(tool => !["read_file", "list_files"].includes(tool.name))) {
++      if (!Array.isArray(request.tools) || request.tools.length !== 2 || new Set(request.tools.map(tool => tool.name)).size !== 2 || request.tools.some(tool => !["read_file", "list_files"].includes(tool.name))) {
 +        throw new Error("Approval model may only investigate files and directories");
 +      }
 +      const messages: ModelInputMessage[] = request.messages.map(value => {
++        if (!value || typeof value !== "object" || Object.keys(value).some(key => !["role", "content", "tool_call_id", "tool_calls"].includes(key))) throw new Error("Review messages may not supply private model state");
 +        const message = value as { role: ModelInputMessage["role"]; content: string; tool_call_id?: string;
 +          tool_calls?: { id: string; function: { name: string; arguments: string } }[] };
 +        if (!["system", "user", "assistant", "tool"].includes(message.role) || typeof message.content !== "string") throw new Error("Invalid review message");
@@ -980,6 +2448,7 @@ index 0000000..c634b3c
 +          ...(message.tool_call_id ? { toolCallId: message.tool_call_id } : {}),
 +          ...(message.tool_calls ? { toolCalls: message.tool_calls.map(call => {
 +            if (!["read_file", "list_files"].includes(call.function.name)) throw new Error("Invalid investigation tool");
++            if (Object.keys(call).some(key => !["id", "type", "function"].includes(key)) || Object.keys(call.function).some(key => !["name", "arguments"].includes(key))) throw new Error("Review tool calls may not supply provider metadata");
 +            return { id: call.id, name: call.function.name, input: JSON.parse(call.function.arguments) };
 +          }) } : {}) };
 +      });
@@ -987,14 +2456,64 @@ index 0000000..c634b3c
 +        name: tool.name, description: tool.description, inputSchema: tool.parameters as ModelToolContract["inputSchema"],
 +        readOnly: true, destructive: false,
 +      }));
-+      const model = createTurnModel(runtime, { retryBudget: ModelRetryBudget.SingleAttempt });
++      const model = createTurnModel(runtime, { selection: binding?.reviewSelection, retryBudget: ModelRetryBudget.SingleAttempt });
++      if (!model.properties.supportsToolCall) throw Object.assign(new Error("Review model must support read-only tools"), { code: "review_model_incompatible" });
++      const bindingId = binding?.bindingId ?? input.requestId;
++      const attempt = binding?.attempt ?? 1;
++      const nativeMessages = continuation.restore(bindingId, attempt, request.messages, messages);
++      const reasoning = new Map<string, ModelReasoningContentBlock>();
 +      // 原生工厂只绑定会话推理档位；输出预算必须逐次提供，否则在请求发送前即被校验拒绝。
-+      const result = await model.generateText({ messages, tools, abortSignal: signal,
-+        options: { maxOutputTokens: Math.min(REVIEW_MAX_OUTPUT_TOKENS, model.optionSpecs.maxOutputTokens.max) } });
++      // Socket callbacks have no reliable ambient context. Bind attribution before entering native streaming.
++      const traceContext = createChildTraceContext(input.traceContext ?? runtime.rootTraceContext, {
++        sessionId: input.sessionId, turnId: input.turnId,
++        attributes: { querySource: "auto_review", toolCallId: String(input.toolCallId), requestId: input.requestId },
++      });
++      const result = { text: "", toolCalls: [] as NonNullable<ModelInputMessage["toolCalls"]> };
++      let finished = false;
++      let providerOptions: Record<string, unknown> | undefined;
++      await runWithModelInvocationContext({
++        traceContext, metadata: { ...traceContextToLogContext(traceContext), querySource: "auto_review" },
++        modelRequestSessionType: "other", modelCall: { operation: "workspace_generate_text" },
++      }, async () => {
++        for await (const event of model.streamText({ messages: nativeMessages, tools, abortSignal: signal,
++          options: { maxOutputTokens: Math.min(REVIEW_MAX_OUTPUT_TOKENS, model.optionSpecs.maxOutputTokens.max) } })) {
++          signal.throwIfAborted();
++          if (event.type === "error") {
++            if (event.error instanceof Error) throw event.error;
++            const failure = approvalReviewFailure(typeof event.error === "string" ? { message: event.error } : event.error);
++            throw Object.assign(new Error(failure.message), failure);
++          }
++          if (event.type === "reasoning_start" || event.type === "reasoning_delta" || event.type === "reasoning_end") {
++            const key = event.id ?? "default";
++            const block = reasoning.get(key) ?? { type: "reasoning" as const, text: "" };
++            if (event.type === "reasoning_delta") block.text += event.text;
++            mergeReasoningMetadata(block, event.providerMetadata);
++            reasoning.set(key, block);
++          }
++          if (event.type === "text_delta") result.text += event.text;
++          if (event.type === "tool_call") result.toolCalls.push(event.toolCall);
++          if (event.type === "finish") {
++            if (!["stop", "tool-calls", "tool_calls", "end_turn"].includes(event.finishReason)) {
++              throw Object.assign(new Error(`Review stream stopped with ${event.finishReason}`), { code: "incomplete_output" });
++            }
++            providerOptions = event.providerMetadata ? Object.fromEntries(Object.entries(event.providerMetadata)
++              .filter(([, value]) => typeof value === "object" && value !== null && !Array.isArray(value))) : undefined;
++            finished = true;
++          }
++        }
++      });
++      if (!finished) throw Object.assign(new Error("Automatic review stream ended before finish"), { code: "missing_finish" });
 +      // Main-model and reviewer hidden reasoning never cross the approval bridge.
-+      return { role: "assistant", content: result.text,
++      const output = { role: "assistant", content: result.text,
 +        ...(result.toolCalls?.length ? { tool_calls: result.toolCalls.map(call => ({ id: call.id,
 +          type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } })) } : {}) };
++      signal.throwIfAborted();
++      continuation.save(bindingId, attempt, request.messages, nativeMessages, output, {
++        role: "assistant", content: [...reasoning.values(), { type: "text", text: result.text }],
++        ...(result.toolCalls.length ? { toolCalls: result.toolCalls } : {}),
++        providerId: model.providerId, modelId: model.modelId, providerOptions,
++      });
++      return output;
 +    },
 +    record(outcome, assessment, input) {
 +      const denied = outcome === "deny";
@@ -1007,21 +2526,180 @@ index 0000000..c634b3c
 +    },
 +  });
 +  return {
-+    open(input, signal, plugin) {
++    isActive: port.isActive,
++    reviewModel: port.reviewModel,
++    open(input, signal, plugin, onReviewModel) {
 +      if (turnId !== input.turnId) {
 +        turnId = input.turnId;
 +        consecutive = 0; window = []; interrupted = false;
 +      }
-+      return port.open(input, signal, plugin);
++      return port.open(input, signal, plugin, onReviewModel);
 +    },
 +  };
 +}
+diff --git a/apps/zcode-cli/packages/core/src/runtime/helpers/approval-continuation.ts b/apps/zcode-cli/packages/core/src/runtime/helpers/approval-continuation.ts
+new file mode 100755
+index 0000000..311ba6e
+--- /dev/null
++++ b/apps/zcode-cli/packages/core/src/runtime/helpers/approval-continuation.ts
+@@ -0,0 +1,50 @@
++import type { ModelInputMessage, ModelReasoningContentBlock } from "@zcode/contracts";
++
++type Continuation = { attempt: number; visible: unknown[]; native: ModelInputMessage[] };
++const fault = (message: string) => Object.assign(new Error(message), { code: "invalid_continuation" });
++
++/** Private runtime state; visible messages are its sole transport capability. */
++export class ApprovalContinuation {
++  readonly #bindings = new Map<string, Continuation>();
++
++  clear(bindingId: string): void { this.#bindings.delete(bindingId); }
++
++  restore(bindingId: string, attempt: number, visible: unknown[], parsed: ModelInputMessage[]): ModelInputMessage[] {
++    if (visible.length === 2) { this.clear(bindingId); return parsed; }
++    const state = this.#bindings.get(bindingId);
++    if (!state || state.attempt !== attempt || visible.length <= state.visible.length ||
++      JSON.stringify(visible.slice(0, state.visible.length)) !== JSON.stringify(state.visible)) {
++      this.clear(bindingId);
++      throw fault("Review transcript does not match its bound visible prefix");
++    }
++    const last = state.native.at(-1);
++    const suffix = parsed.slice(state.visible.length);
++    const pending = new Set(last?.toolCalls?.map(call => call.id) ?? []);
++    for (const message of suffix) {
++      if (message.role !== "tool" || !message.toolCallId || !pending.delete(message.toolCallId)) {
++        this.clear(bindingId);
++        throw fault("Review continuation may only append the pending read tool results");
++      }
++      message.toolName = last?.toolCalls?.find(call => call.id === message.toolCallId)?.name;
++    }
++    if (pending.size) { this.clear(bindingId); throw fault("Review continuation is missing a read tool result"); }
++    return [...structuredClone(state.native), ...suffix];
++  }
++
++  save(bindingId: string, attempt: number, visible: unknown[], native: ModelInputMessage[],
++    output: unknown, assistant: ModelInputMessage): void {
++    this.#bindings.set(bindingId, { attempt, visible: structuredClone([...visible, output]),
++      native: structuredClone([...native, assistant]) });
++  }
++}
++
++/** Preserve block signatures and provider metadata without sending them to the plugin. */
++export function mergeReasoningMetadata(block: ModelReasoningContentBlock, metadata?: Record<string, unknown>): void {
++  if (!metadata) return;
++  const merged = { ...block.providerOptions };
++  for (const [key, value] of Object.entries(metadata)) {
++    merged[key] = typeof value === "object" && value !== null && !Array.isArray(value)
++      ? { ...(merged[key] as Record<string, unknown> | undefined), ...value } : value;
++  }
++  block.providerOptions = merged;
++}
+diff --git a/apps/zcode-cli/packages/core/src/tool/executor/permission-review-flow.ts b/apps/zcode-cli/packages/core/src/tool/executor/permission-review-flow.ts
+new file mode 100755
+index 0000000..3c1fdfd
+--- /dev/null
++++ b/apps/zcode-cli/packages/core/src/tool/executor/permission-review-flow.ts
+@@ -0,0 +1,95 @@
++import {
++  approvalReviewFailure, SessionEventType, type ApprovalReviewFailure,
++  type PermissionBrokerRequest, type PermissionBrokerResult, type PermissionUpdate,
++  type CollaborationMode, type TraceContext,
++} from "@zcode/contracts";
++import type { PermissionDecisionResult } from "../../permission/service.js";
++import type { ToolExecutorDeps } from "./types.js";
++import type { ExecutableToolCall } from "../types.js";
++import { hookMatcherToolNamesForTool } from "../compat.js";
++import { emitPermissionRequested, emitPermissionResolved } from "./events.js";
++import { runPermissionRequestHooks } from "./hook-flow.js";
++import { racePermissionResponders } from "./permission-responder-race.js";
++
++type Args = {
++  deps: ToolExecutorDeps; toolCall: ExecutableToolCall; executionInput: unknown;
++  requestId: string; permissionDecision: PermissionDecisionResult;
++  mode: CollaborationMode; traceContext: TraceContext; signal?: AbortSignal;
++  suggestedPermissionUpdates: PermissionUpdate[];
++  approval: Parameters<typeof emitPermissionRequested>[8];
++};
++
++export async function resolvePermissionResponders(args: Args): Promise<{ source: "hook" | "broker"; result: PermissionBrokerResult }> {
++  const { deps, toolCall, executionInput, requestId, permissionDecision, mode, traceContext, signal,
++    suggestedPermissionUpdates, approval } = args;
++  const automatic = deps.hookRunner?.hasAutomaticPermissionReview?.({
++    matchValue: toolCall.name, matchValues: hookMatcherToolNamesForTool(toolCall.name),
++  }) === true;
++  const publish = (failure?: ApprovalReviewFailure, once = false) => emitPermissionRequested(deps, toolCall,
++    executionInput, requestId, permissionDecision.riskLevel, permissionDecision.reason,
++    suggestedPermissionUpdates, traceContext, { ...approval, ...(failure ? { reviewFailure: failure } : {}), ...(once ? { optionsPolicy: "no-always-allow" } : {}) });
++  const broker = (brokerSignal?: AbortSignal, claimResponse?: () => boolean, failure?: ApprovalReviewFailure, once = false) =>
++    deps.permissionBroker.requestPermission({
++      input: executionInput, mode, reason: permissionDecision.reason ?? `Tool ${toolCall.name} requires approval`,
++      requestId, requestedAt: new Date(), riskLevel: permissionDecision.riskLevel, ruleId: permissionDecision.ruleId,
++      sessionId: deps.sessionId, sideEffectScope: permissionDecision.sideEffectScope, suggestedPermissionUpdates,
++      ...(approval?.optionsPolicy ? { optionsPolicy: approval.optionsPolicy } : {}),
++      ...(once ? { optionsPolicy: "no-always-allow" as const } : {}),
++      ...(failure ? { reviewFailure: failure } : {}),
++      toolCallId: toolCall.id as PermissionBrokerRequest["toolCallId"], toolName: toolCall.name,
++      traceId: traceContext.traceId, turnId: traceContext.turnId ?? deps.turnId,
++    }, { signal: brokerSignal, claimResponse, timeoutMs: deps.permissionTimeoutMs,
++      ...(automatic ? { onRegistered: () => publish(failure, once) } : {}) });
++  const reviewEvent = (completed: boolean, outcome?: "allow" | "deny" | "failed" | "cancelled", failure?: ApprovalReviewFailure,
++    actualReviewModel?: import("@zcode/contracts").ModelSelection) =>
++    deps.emitEvent({ id: crypto.randomUUID() as any, sessionId: deps.sessionId,
++      turnId: traceContext.turnId ?? deps.turnId, traceId: traceContext.traceId,
++      timestamp: new Date(), sequenceNumber: 0,
++      type: completed ? SessionEventType.PermissionReviewCompleted : SessionEventType.PermissionReviewStarted,
++      payload: { requestId, toolCallId: toolCall.id, toolName: toolCall.name, outcome, reviewFailure: failure,
++        actualReviewModel: actualReviewModel ?? deps.hookRunner?.automaticReviewModel?.({ matchValue: toolCall.name,
++          ...(completed ? { reviewRequestId: requestId } : {}),
++          matchValues: hookMatcherToolNamesForTool(toolCall.name) }) } });
++  if (automatic) {
++    await reviewEvent(false);
++    let failure: ApprovalReviewFailure | undefined;
++    let result: PermissionBrokerResult | undefined;
++    try {
++      result = await runPermissionRequestHooks(deps, toolCall, executionInput, requestId,
++        permissionDecision, mode, traceContext, signal, value => { failure = approvalReviewFailure(value); });
++      signal?.throwIfAborted();
++    } catch (error) {
++      if (signal?.aborted) { await reviewEvent(true, "cancelled"); throw error; }
++      failure = approvalReviewFailure(error);
++    }
++    if (result && !failure) {
++      await reviewEvent(true, result.decision === "deny" ? "deny" : "allow", undefined, result.actualReviewModel);
++      const fallback = async (resolveNow = false) => {
++        const stale = { code: "stale_context", message: "Automatic review context changed before execution" };
++        await reviewEvent(true, "failed", stale, result!.actualReviewModel);
++        let claimed = false;
++        const manual = await broker(signal, () => { if (claimed) return false; claimed = true; return true; }, stale, true);
++        if (resolveNow) await emitPermissionResolved(deps, toolCall, requestId, manual, traceContext);
++        return manual;
++      };
++      if (result.isStillCurrent?.() === false) return { source: "broker", result: await fallback() };
++      return { source: "hook", result: { ...result, requestManualFallback: () => fallback(true) } };
++    }
++    failure ??= { code: "missing_decision", message: "Automatic review returned no usable decision" };
++    await reviewEvent(true, "failed", failure);
++    // 只在审查失败后启动人工审批；原生 broker 登记应答后才发布弹窗，首次点击不会丢失。
++    let claimed = false;
++    return { source: "broker", result: await broker(signal, () => { if (claimed) return false; claimed = true; return true; }, failure) };
++  }
++  await publish();
++  return racePermissionResponders({
++    requestBroker: (brokerSignal, claim) => broker(brokerSignal, claim),
++    runHooks: hookSignal => runPermissionRequestHooks(deps, toolCall, executionInput, requestId,
++      permissionDecision, mode, traceContext, hookSignal),
++    signal,
++    onHookFailure: error => deps.logger?.warn("PermissionRequest hook failed; waiting for client", {
++      requestId, toolCallId: toolCall.id, errorMessage: approvalReviewFailure(error).message,
++      event: "tool.permission.hook_race_forfeited", module: "core.tool.executor", status: "waiting",
++    }),
++  });
++}
 diff --git a/docs/specs/codex-auto-approval.md b/docs/specs/codex-auto-approval.md
 new file mode 100755
-index 0000000..eadbb37
+index 0000000..5f3ad13
 --- /dev/null
 +++ b/docs/specs/codex-auto-approval.md
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,295 @@
 +# Codex automatic approval plugin bridge
 +
 +The local desktop installation is 3.14.4. This patch is based on source commit
@@ -1043,7 +2721,7 @@ index 0000000..eadbb37
 +  H->>P: stdin + event-scoped bridge socket/token
 +  P->>H: context/read
 +  P->>H: model/complete with reviewer messages and read tool schemas
-+  H->>M: Bound current model, credentials remain in host
++  H->>M: Host-bound review model, credentials remain in host
 +  M-->>P: Normalized text/tool calls
 +  P-->>H: allow / deny / ask + assessment
 +  H->>R: Validate lease, update per-turn denial state
@@ -1053,15 +2731,17 @@ index 0000000..eadbb37
 +The runtime owns authoritative human input, session rejection action history, and per-turn counters.
 +The configured hook owns its transient lease; the execution adapter owns socket
 +I/O. A bridge exists only for the enabled `codex-auto-approval` plugin's foreground
-+PermissionRequest process. No alternate model, provider, tools, shell, execution,
-+or credential retrieval capability is exposed. Standard permission checking runs
++PermissionRequest process. The host resolves the configured review model; the plugin
++cannot choose it through request parameters or retrieve credentials. No shell or
++execution capability is exposed. Standard permission checking runs
 +before and after hooks; hard denies and plan restrictions retain precedence.
 +
 +## Contract
 +
-+Bridge version 1 uses bounded NDJSON requests `{ id, token, method, params }` and
-+responses `{ id, result }` or `{ id, error: { code, message, retryable } }`.
-+`context/read` returns binding, complete action, current model selection, trusted
++Bridge version 2 uses bounded NDJSON requests `{ id, token, method, params }` and
++responses `{ id, result }` or `{ id, error: { code, message, retryable,
++businessCode?, httpStatus?, requestId?, retryAfterMs? } }`.
++`context/read` returns binding, complete action, main and actual review selections, trusted
 +human input records, limited visible evidence, previous denials, and deadline.
 +`model/complete` accepts reviewer messages and the fixed `read_file/list_files`
 +schemas and returns the existing Reviewer completion shape. Native model
@@ -1071,7 +2751,7 @@ index 0000000..eadbb37
 +child-process environment overlays. They are minted by the adapter, never
 +accepted from inherited environment or project configuration, and never persisted
 +or sent to the model. Windows uses named pipes; other platforms use private Unix
-+sockets. `ZCODE_APPROVAL_BRIDGE_VERSION=1` advertises this contract. Missing bridge,
++sockets. `ZCODE_APPROVAL_BRIDGE_VERSION=2` advertises this contract. Missing bridge,
 +invalid input, missing authoritative context, and transport failures request
 +human approval, never allow.
 +
@@ -1172,6 +2852,163 @@ index 0000000..eadbb37
 +avoids the official app's single-instance lock, and makes `ZCode.exe` directly
 +launchable without a cmd environment wrapper. Development and Preview defaults,
 +explicit test overrides and shared native user plugin settings stay unchanged.
++
++## 0.1.2 review-first lifecycle
++
++Only a loaded foreground CodexAutoApproval PermissionRequest process advertises
++review-first capability. Runtime tool permission flow owns the lifecycle keyed by
++requestId/toolCallId/turnId. Other permission hooks retain their responder race.
++Native hard denies and Plan constraints are checked before review. The native
++interaction registry owns each manual answer; projections never own decisions.
++
++Order: permission_review_started -> review hook -> permission_review_completed.
++Allow executes once without permission_requested; deny returns corrective feedback
++without execution or manual prompt. On technical failure the broker registers
++its answer receiver, then its onRegistered callback emits permission_requested
++with reviewFailure {code,message}, then starts the legacy client request.
++First and duplicate clicks share the existing one-shot registry. Cancellation
++closes the lease and clears projected progress; stale model, authorization,
++workspace, branch, or plugin state cannot authorize execution. At most three
++review attempts share one 90-second deadline. Persistent changes fall back.
++
++The host passes an immutable full TraceContext plus bound session/turn/query/tool
++identity into owner.complete. The stream runs inside explicit native invocation
++context with querySource=auto_review and truthful auxiliary session type=other;
++only the native adapter builds authentication and attribution headers. It uses
++streamText, collects text_delta and final tool_call events, keeps hidden
++reasoning only in private continuation state, rejects errors, truncated output and a missing finish. Selected
++provider/model/reasoning and min(8192, model maximum) output budget are preserved.
++
++Review events are durable session facts. Desktop and replay derive a reviewing
++label on the existing tool row, without creating a pending human interaction.
++Failure reasons cross contracts, bridge, v3 and v4 as bounded sanitized code/message.
++No credentials, raw provider bodies, or stack traces enter the permission dialog.
++The dialog says “自动审查失败，需人工确认” and exposes the sanitized cause.
++
++Local release is 0.1.2 under a new artifact directory; the installed desktop and
++user credentials are not replaced. Acceptance records include core/host checks,
++baseline-only failures, isolated Windows UI screenshots, SHA256 checksums, and
++a real current GLM review. Local stub success cannot prove server interception
++is fixed; record live failure and manual fallback if the real service rejects it.
++
++Admission also checks current native plugin activity through ApprovalBridgePort.isActive. A frozen loaded hook catalog after disable must not create another review-progress phase; an in-flight disable still cancels its existing lease and falls back.
++
++## 0.1.3 independent review model (normative current contract)
++
++### Configuration owner and interface
++
++The native plugin configuration service is the only owner of review selection.
++Use its existing user and workspace scopes; workspace values override the user
++default. Persist only a runtime-validated discriminated selection: inherit, or
++specified provider reference, model reference and optional supported reasoning
++level. An absent legacy option means inherit. No provider URL, protocol, API key
++or credential copy is stored in plugin options. No database migration is needed.
++The plugin settings expose follow-session / specified-model controls using the
++existing native model picker, reasoning options and provider-management screen.
++The provider screen owns custom Base URL, protocol and credentials. Saving must
++use the native plugins/configure command, survive restart and apply on the next
++review without changing the main session selection.
++
++The host reads effective configuration, validates its model reference against
++current native providers/models and supported reasoning/tool capabilities, then
++resolves the review model through native Chat Completions, Responses or Anthropic
++adapters. Deleted models, missing credentials, unsupported options/capabilities
++and malformed configuration yield specific technical failures and human approval.
++There is no fallback to a different provider or model.
++
++### Binding and lifetime
++
++Each approval snapshot binds the full action, real user authorization, session,
++turn, workspace identity/path, branch generation, main session selection, actual
++review selection and effective configuration version. The configuration version
++must reflect provider/model/credential changes as well as plugin options; values
++that may contain secrets stay host-only. Revalidate all fields before each model
++request, after it completes and before recording/executing a decision. A change
++invalidates the in-flight review immediately; its old result cannot authorize a
++new action. A permitted restart uses a fresh snapshot within the same three
++attempts and original 90-second deadline. Native calls use SingleAttempt.
++
++Runtime owns a private continuation map keyed by the active binding and review
++attempt. It preserves native assistant reasoning and provider metadata needed
++by that model's tool continuation. The host validates the visible transcript
++prefix before reconstructing subsequent native calls; the plugin cannot inject
++hidden state or receive it. Clear state on retry, stale binding, cancellation,
++disable, completion and lease close. Never share it with another review, the main
++model, plugin replies, progress, logs or delivery evidence. DeepSeek tool requests
++require complete previous reasoning_content, including assistant messages without
++tool calls: https://api-docs.deepseek.com/guides/thinking_mode/ .
++
++```mermaid
++sequenceDiagram
++  participant C as Native plugin/provider config
++  participant R as Session runtime (binding and continuation owner)
++  participant P as Approval plugin
++  participant M as Bound native model adapter
++  C-->>R: Effective selection and configuration version
++  R->>P: Bound action, authorization and visible context (bridge v2)
++  P->>R: Visible review transcript and read-only investigation schemas
++  R->>R: Validate snapshot and restore private continuation
++  R->>M: One attributed native stream
++  M-->>R: Visible output, tools, private reasoning and metadata
++  R->>R: Preserve private state for this binding only
++  R-->>P: Visible output and tools only
++  P-->>R: allow / deny / technical failure
++  R->>R: Revalidate, execute once or admit native human response
++  R->>R: Clear binding continuation
++```
++
++### Diagnostics and preserved policy
++
++Bridge v2 host and plugin ship together; a mismatched version fails to human
++approval. Progress and durable review records expose the actual review model.
++Failures may carry bounded business code, HTTP status, request id and retry
++information. All fields pass one sanitization boundary, excluding credentials,
++URLs with secrets, raw response bodies and stack traces. Explicit nonretryable
++provider interception stops immediately; technical failures do not increment
++policy denial counters. Preserve Codex policy, read-only investigation, native
++hard prohibits, Plan constraints, one-shot decisions, manual duplicate handling,
++truthful querySource=auto_review and the existing trace/session attribution.
++Do not bypass GLM interception by relabeling request identity.
++
++### Required acceptance and local delivery
++
++Test inherited/default and specified selection; custom providers; scope override;
++restart persistence; unchanged main model; missing/deleted/incompatible selection;
++allow executes once; deny executes zero times; 401, explicit service interception,
++broken stream, invalid output, timeout and cancellation; changing model/config or
++authorization during review; duplicate human responses; plugin disable. Force a
++read-only tool continuation and assert complete native hidden state, cross-review
++isolation and no state/credential leakage across the bridge or evidence.
++
++Run core, bridge and host regression on available Linux and Windows runtimes,
++isolated Windows UI regression, root and CLI typecheck/lint and architecture
++checks. Report baseline failures separately from new failures. Real Windows
++DeepSeek uses DEEPSEEK_API_KEY injected only into an isolated test host, official
++deepseek-flash with High reasoning. Clear temporary configuration on exit. Prove
++real automatic low-risk allow, controlled deny with a side-effect-free executor
++probe and file investigation. A missing key or transport restriction is an
++unverified scenario, never a success. Try GLM main session plus DeepSeek review;
++separately compare real same-account ordinary GLM and GLM review requests. Record
++their distinct outcomes; DeepSeek success does not prove GLM is unblocked.
++
++Deliver only locally under artifacts/0.1.3: independent Windows desktop, plugin
++ZIP, complete host patch, SHA256 checksums and sanitized acceptance report. Keep
++artifacts/0.1.2 intact for rollback. Update installation/configuration guidance
++and GLM status. No public publication, database migration or user-profile change.
+diff --git a/packages/shared/src/zcode-protocol/approval-review.ts b/packages/shared/src/zcode-protocol/approval-review.ts
+new file mode 100755
+index 0000000..6393403
+--- /dev/null
++++ b/packages/shared/src/zcode-protocol/approval-review.ts
+@@ -0,0 +1,8 @@
++import { z } from "zod";
++
++export const zcodeApprovalReviewFailureSchema = z.object({
++  code: z.string().max(80), message: z.string().max(2000),
++  businessCode: z.string().max(80).optional(), httpStatus: z.number().int().min(100).max(599).optional(),
++  requestId: z.string().max(160).optional(), retryAfterMs: z.number().int().min(0).max(90000).optional(),
++  retryable: z.boolean().optional(),
++}).strict();
 diff --git a/packages/ui/src/hooks/useCodexAutoApprovalMode.ts b/packages/ui/src/hooks/useCodexAutoApprovalMode.ts
 new file mode 100755
 index 0000000..48ab636
@@ -1284,4 +3121,240 @@ index 0000000..48ab636
 +    refresh,
 +    error: sameContext && state.lastFailedPluginId === PLUGIN_ID ? state.error : null,
 +  };
++}
+diff --git a/packages/ui/src/settings/CodexReviewModelControls.tsx b/packages/ui/src/settings/CodexReviewModelControls.tsx
+new file mode 100755
+index 0000000..6ca915e
+--- /dev/null
++++ b/packages/ui/src/settings/CodexReviewModelControls.tsx
+@@ -0,0 +1,162 @@
++import { useState } from "react";
++import { completeNewModelSelection } from "@zcode/provider";
++import {
++  ZCODE_AGENT_PROVIDER,
++  zcodeReviewModelSelectionSchema,
++  type ZCodeReviewModelSelection,
++  type ZCodePluginInfo,
++  type ZCodePluginScope,
++} from "@zcode/shared";
++import type { IModelSelectionService, IPluginManagementService } from "@zcode/services";
++import { ModelConfigSelect } from "@/ModelConfigSelect.js";
++import { Button } from "@/components/ui/button.js";
++import { useModelSelectionServiceView } from "@/hooks/useModelSelectionView.js";
++import { useZCodeIntl } from "@/i18n/IntlProvider.js";
++import { buildRegistryModelSelectGroups } from "@/lib/modelSelectionGroups.js";
++import { resolveModelThoughtOption } from "@/lib/modelThoughtOption.js";
++import { formatModelPickerValue, parseModelPickerValue } from "@/lib/zcodeSessionProjection.js";
++import { SettingsScopeBadge } from "@/settings/SettingsScopeBadge.js";
++import { SubagentReasoningField } from "@/settings/SubagentReasoningField.js";
++import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
++
++/** 插件配置是唯一事实；此组件只保留尚未提交的编辑草稿。 */
++export function CodexReviewModelControls({
++  plugin,
++  scope,
++  modelService,
++  pluginService,
++  onManageModels,
++}: {
++  plugin: ZCodePluginInfo;
++  scope: ZCodePluginScope;
++  modelService: IModelSelectionService;
++  pluginService: IPluginManagementService;
++  onManageModels?: () => void;
++}) {
++  const { intl } = useZCodeIntl();
++  const { state } = useModelSelectionServiceView(modelService);
++  const view = state.status === "ready" ? state.view : null;
++  const [draft, setDraft] = useState<ZCodeReviewModelSelection | null>(null);
++  const configure = usePluginManagementStore((store) => store.configurePlugin);
++  const saving = usePluginManagementStore(
++    (store) => store.operationId === `plugin:configure:${plugin.id}`,
++  );
++  const rawSaved = plugin.configuredOptions?.reviewModel;
++  const saved = zcodeReviewModelSelectionSchema.safeParse(rawSaved);
++  const invalidSaved = rawSaved !== undefined && !saved.success && draft === null;
++  const selection: ZCodeReviewModelSelection =
++    draft ?? (saved.success ? saved.data : { mode: "inherit" });
++  const groups = view ? buildRegistryModelSelectGroups(ZCODE_AGENT_PROVIDER, view) : [];
++  const value = selection.mode === "specified" ? formatModelPickerValue(selection) : "inherit";
++  const thought =
++    selection.mode === "specified" && view
++      ? resolveModelThoughtOption({
++          modelSelectionView: view,
++          providerId: selection.providerId,
++          modelId: selection.modelId,
++          currentValue: selection.options?.reasoningLevel,
++        })
++      : null;
++  const text = (id: string) => intl.formatMessage({ id });
++  return (
++    <div
++      className="mt-3 grid gap-2 border-t border-border pt-3"
++      data-testid="codex-review-model-config"
++      data-config-scope={scope}
++      data-review-model-mode={selection.mode}
++      data-review-provider-id={selection.mode === "specified" ? selection.providerId : undefined}
++      data-review-model-id={selection.mode === "specified" ? selection.modelId : undefined}
++      data-review-reasoning={
++        selection.mode === "specified" ? selection.options?.reasoningLevel : undefined
++      }
++    >
++      <div className="flex items-center gap-2 text-ui-base font-medium">
++        {text("settings.plugins.reviewModel.title")}
++        <SettingsScopeBadge scope={plugin.optionSources?.reviewModel ?? "default"} />
++      </div>
++      <div className="flex flex-wrap items-center gap-2">
++        <ModelConfigSelect
++          modelGroups={groups}
++          labelVisibilityClassName="inline-flex"
++          normalizedValue={invalidSaved ? "invalid" : value}
++          triggerLabel={
++            invalidSaved
++              ? text("settings.plugins.reviewModel.invalid")
++              : selection.mode === "inherit"
++                ? text("settings.plugins.reviewModel.inherit")
++                : selection.modelId
++          }
++          showManageModelsAction={Boolean(onManageModels)}
++          onManageModels={onManageModels}
++          manageModelsLabel={intl.formatMessage({ id: "chat.toolbar.model.manageModels" })}
++          lockReasonMessage=""
++          isItemLocked={() => false}
++          disabled={saving}
++          footerActions={[
++            {
++              key: "inherit",
++              label: text("settings.plugins.reviewModel.inherit"),
++              selected: selection.mode === "inherit",
++              onSelect: () => setDraft({ mode: "inherit" }),
++            },
++          ]}
++          onValueChange={(next) => {
++            if (!view) return;
++            const chosen = completeNewModelSelection(view, parseModelPickerValue(next));
++            if (chosen)
++              setDraft({
++                mode: "specified",
++                providerId: chosen.providerId,
++                modelId: chosen.modelId,
++                ...(chosen.options?.reasoningLevel
++                  ? { options: { reasoningLevel: chosen.options.reasoningLevel } }
++                  : {}),
++              });
++          }}
++        />
++        <SubagentReasoningField
++          intl={intl}
++          disabled={saving}
++          labelVisibilityClassName="inline-flex"
++          state={thought ? { kind: "supported", option: thought } : { kind: "not-applicable" }}
++          onValueCommit={(reasoningLevel) => {
++            if (selection.mode === "specified")
++              setDraft({ ...selection, options: { reasoningLevel } });
++          }}
++        />
++        {scope === "workspace" && plugin.optionSources?.reviewModel === "workspace" ? (
++          <Button
++            data-testid="codex-review-model-restore"
++            variant="ghost"
++            disabled={saving}
++            onClick={async () => {
++              if (await configure(plugin.id, {}, pluginService, scope, ["reviewModel"]))
++                setDraft(null);
++            }}
++          >
++            {intl.formatMessage({ id: "settings.plugins.config.restoreOption" })}
++          </Button>
++        ) : null}
++        <Button
++          data-testid="codex-review-model-save"
++          variant="outline"
++          disabled={saving || !draft}
++          onClick={async () => {
++            if (draft && (await configure(plugin.id, { reviewModel: draft }, pluginService, scope)))
++              setDraft(null);
++          }}
++        >
++          {intl.formatMessage({ id: "settings.plugins.config.save" })}
++        </Button>
++      </div>
++      {invalidSaved ? (
++        <p role="alert" className="text-ui-sm text-destructive">
++          {text("settings.plugins.reviewModel.invalid")}
++        </p>
++      ) : null}
++      <p className="text-ui-sm text-foreground-subtle">
++        {text("settings.plugins.reviewModel.description")}
++      </p>
++    </div>
++  );
++}
+diff --git a/packages/ui/src/v4/PermissionReviewStatus.tsx b/packages/ui/src/v4/PermissionReviewStatus.tsx
+new file mode 100755
+index 0000000..32ecd1e
+--- /dev/null
++++ b/packages/ui/src/v4/PermissionReviewStatus.tsx
+@@ -0,0 +1,62 @@
++import type { ToolCallRow } from "@zcode/shared/zcode-protocol-v4";
++import {
++  Tooltip,
++  TooltipContent,
++  TooltipProvider,
++  TooltipTrigger,
++} from "@/components/ui/tooltip.js";
++import { useZCodeIntl } from "@/i18n/IntlProvider.js";
++
++export function PermissionReviewStatus({ row }: { row: ToolCallRow }) {
++  const { intl } = useZCodeIntl();
++  const review = row.permissionReview;
++  if (!review) return null;
++  const reviewing = review.status === "reviewing";
++  // 旧进度不能覆盖终态工具；已完成审查是持久化事实，工具完成后仍需显示实际模型。
++  if (reviewing && ["success", "error", "cancelled"].includes(row.status)) return null;
++  const labels = {
++    reviewing: "chat.permission.autoReviewing",
++    allow: "chat.permission.autoReviewAllowed",
++    deny: "chat.permission.autoReviewDenied",
++    failed: "chat.permission.autoReviewFailedShort",
++    cancelled: "chat.permission.autoReviewCancelled",
++  };
++  const model = review.actualReviewModel;
++  const status = (
++    <p
++      role="status"
++      tabIndex={model ? 0 : undefined}
++      data-testid={reviewing ? "auto-review-progress" : "auto-review-result"}
++      data-review-status={review.status}
++      data-review-provider-id={model?.providerId}
++      data-review-model-id={model?.modelId}
++      data-review-reasoning={model?.options?.reasoningLevel}
++      className={`text-ui-caption text-foreground-subtle${reviewing ? " animate-pulse" : ""}`}
++    >
++      {intl.formatMessage({ id: labels[review.status] })}
++      {model ? ` · ${model.modelId}` : ""}
++    </p>
++  );
++  if (!model) return status;
++  return (
++    <TooltipProvider>
++      <Tooltip>
++        <TooltipTrigger asChild>{status}</TooltipTrigger>
++        <TooltipContent data-testid="auto-review-model-details" className="flex-col items-start">
++          <span>
++            {intl.formatMessage({ id: "chat.permission.reviewProvider" })}: {model.providerId}
++          </span>
++          <span>
++            {intl.formatMessage({ id: "chat.permission.reviewModel" })}: {model.modelId}
++          </span>
++          {model.options?.reasoningLevel ? (
++            <span>
++              {intl.formatMessage({ id: "chat.permission.reviewReasoning" })}:{" "}
++              {model.options.reasoningLevel}
++            </span>
++          ) : null}
++        </TooltipContent>
++      </Tooltip>
++    </TooltipProvider>
++  );
 +}

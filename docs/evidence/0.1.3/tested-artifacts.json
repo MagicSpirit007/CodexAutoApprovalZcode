@@ -1,0 +1,18 @@
+{
+  "version": "0.1.3",
+  "bridgeProtocol": 2,
+  "desktopAsarSha256": "37bfaf4643d6fc8292afd8d6011155144fa1b7a1a61c848c0849f3e0d999b539",
+  "agentSha256": "ba47955a192dd0f7692379bedb1bc48ef903692d5c5bf4ec52a576e63d98cf8b",
+  "runtimeAcceptanceCompleted": true,
+  "guiAcceptanceCompleted": true,
+  "windowsTestNodeVersion": "22.19.0",
+  "linuxBuildNodeVersion": "24.14.0",
+  "bundles": {
+    "host-chain.bundle.mjs": "e392f9af6c8be0655a9b55d89687479a25b4f85023c34c73eb50d7fabb505ce8",
+    "desktop-bridge.bundle.mjs": "54c60c6b57833af18d735ac3e869a8d36465b1237fb92cb2136b41a9eb463b6b",
+    "approval-protocols.bundle.mjs": "c15301fd200cb799abd1fcfb346c4d38c416e6e1ab41eb053c8547ed03f9f40f",
+    "desktop-live-review.bundle.mjs": "e9e1f2328f4ca7a88d91ad1d829ffae3131bff3643f034d59b746447ebe3fbfe"
+  },
+  "guiSettingsScriptSha256": "a2a3516fb6a9f8b7c5ba17d58378632e5bf7d6135149911ed3d3d2674dae61fb",
+  "guiE2EScriptSha256": "61d8c449d119e50ab1b77cca53d7841c0c021f9d66ccde75b59cb0565d31154d"
+}

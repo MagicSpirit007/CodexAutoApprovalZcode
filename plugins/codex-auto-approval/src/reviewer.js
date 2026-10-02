@@ -1,7 +1,7 @@
 // Approval lifecycle and assessment semantics adapted from OpenAI Codex (Apache-2.0).
 // zcode changes: provider-neutral model calls, host read tools, durable human fallback.
 import fs from 'node:fs/promises';
-import { ModelError, cancelled, clip, underSignal } from './util.js';
+import { ModelError, cancelled, reviewFailure, underSignal } from './util.js';
 import { withRetry } from './model.js';
 import { readTools } from './tools.js';
 
@@ -73,8 +73,9 @@ export class Reviewer {
       return { status: assessment.outcome, assessment, source: 'auto_review' };
     } catch (e) {
       cancelled(signal);
-      await this.emit('review_failed', { fingerprint: action.fingerprint, code: e.code ?? 'review_error', reason: clip(e.message, 2000) });
-      return { status: 'human_required', reason: `Automatic review could not finish (${e.code ?? 'review_error'}): ${clip(e.message, 2000)}. This is not a policy denial.` };
+      const failure = reviewFailure(e);
+      await this.emit('review_failed', { fingerprint: action.fingerprint, ...failure });
+      return { status: 'human_required', reviewFailure: failure, reason: `Automatic review could not finish (${failure.code}): ${failure.message}. This is not a policy denial.` };
     }
   }
 }

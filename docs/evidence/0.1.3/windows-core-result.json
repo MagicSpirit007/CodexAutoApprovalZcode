@@ -1,0 +1,11 @@
+{
+  "platform": "Windows",
+  "command": "node --test test/approval.test.js test/cli.test.js test/model.test.js test/runtime.test.js",
+  "pass": 52,
+  "fail": 0,
+  "skip": 0,
+  "exitCode": 0,
+  "rawLogPersisted": false,
+  "sourceHashes": "windows-core-source-hashes.json",
+  "sourcesUnchangedAtFinalNativeFreeze": true
+}

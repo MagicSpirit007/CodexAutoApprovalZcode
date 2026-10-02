@@ -2,7 +2,7 @@ import { DesktopBridgeClient, DesktopModelClient } from './desktop-client.js';
 import { defaults } from './config.js';
 import { Reviewer, rejectionInstructions } from './reviewer.js';
 import { Tools } from './tools.js';
-import { cancelled, hash } from './util.js';
+import { cancelled, hash, reviewFailure } from './util.js';
 
 export const hookOutput = decision => ({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } });
 export async function reviewDesktopPermission(input, { env = process.env, signal } = {}) {
@@ -29,13 +29,13 @@ export async function reviewDesktopPermission(input, { env = process.env, signal
       const result = await reviewer.decide(context.action, context.state, signal);
       // A new snapshot is required after a model or authorization change.
       if (result.status === 'human_required' && result.reason.includes('(stale_context)') && attempt + 1 < defaults.approval.maxAttempts) continue;
-      if (result.status === 'human_required') return hookOutput({ behavior: 'ask', message: result.reason });
+      if (result.status === 'human_required') return hookOutput({ behavior: 'ask', message: result.reason, reviewFailure: result.reviewFailure });
       return hookOutput({ behavior: result.status, bindingId: context.bindingId, assessment: result.assessment,
         ...(result.status === 'deny' ? { message: `${result.assessment.rationale}\n\n${rejectionInstructions}` } : {}) });
     }
     return hookOutput({ behavior: 'ask', message: 'Approval context kept changing; manual approval required' });
   } catch (error) {
     cancelled(signal);
-    return hookOutput({ behavior: 'ask', message: `Automatic review unavailable: ${error.message}` });
+    return hookOutput({ behavior: 'ask', message: 'Automatic review unavailable', reviewFailure: reviewFailure(error) });
   }
 }

@@ -1,5 +1,15 @@
 {
   "name": "codex-auto-review-local",
-  "owner": { "name": "CodexAutoReview" },
-  "plugins": [{ "name": "codex-auto-approval", "displayName": "CodexAutoApproval", "source": "./plugins/codex-auto-approval", "description": "CodexAutoApproval: approval review using the current desktop session model. Requires the host approval bridge.", "version": "0.1.1" }]
+  "owner": {
+    "name": "CodexAutoReview"
+  },
+  "plugins": [
+    {
+      "name": "codex-auto-approval",
+      "displayName": "CodexAutoApproval",
+      "source": "./plugins/codex-auto-approval",
+      "description": "CodexAutoApproval: native inherited or independently selected approval review. Requires bridge v2.",
+      "version": "0.1.3"
+    }
+  ]
 }

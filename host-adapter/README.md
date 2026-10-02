@@ -58,7 +58,7 @@ python scripts/build-release.py
 
 路径参数指向资源来源目录，里面应有 `ZCode.exe`、`resources/app.asar` 和 `resources/glm/zcode.cjs`。脚本写入本仓库的 `artifacts/0.1.3/CodexAutoApproval-Windows/`，不覆盖来源目录。也可在 WSL 中把参数换成挂载路径；构建结果仍为 Windows 发行。
 
-重建插件代码时运行 `npm run package:desktop`；已有运行时保留。首次替换 Node 运行时可执行 `node scripts/package-desktop.mjs /path/to/node.exe`，并手动核对相应 `runtime/LICENSE-node.txt`。发行包含 Node 22.19.0 Windows x64；安装者不需要另装 Node。
+重建插件代码时运行 `npm run package:desktop`。插件使用 `PATH` 中的系统 Node.js 22 或以上；打包脚本清理旧的随包运行时，发行 ZIP 不包含 Node。安装者需安装 Windows Node.js 并加入 `PATH`，用 `node --version` 确认版本，随后重启桌面。
 
 `python scripts/build-release.py` 在 `artifacts/0.1.3/` 生成插件 ZIP、桌面 ZIP、补丁副本和 SHA256SUMS.txt。桌面内 `AUTO-REVIEW-BUILD.json` 记录原始 / 适配 Agent 与 app.asar 指纹以及源码来源。
 
@@ -72,7 +72,7 @@ python scripts/build-release.py
 
 菜单通过原生插件服务写入工作区启停设置；原生权限模式、Plan 约束和更新机制保留。官方更新可能替换适配代码，升级后需重新核对桥和菜单。
 
-公开 [Hooks](https://zcode.z.ai/en/docs/hooks) 不提供完整运行时授权来源及当前模型句柄，因此完整功能需要宿主补丁。[插件规范](https://zcode.z.ai/en/docs/plugin)负责插件安装，不能代替宿主桥。0.1.3 需手动解压插件 ZIP 后添加本地 marketplace；GitHub 归档入口有单文件 50 MiB 限制，小于随包 Node。凭据留在宿主，不传入插件。
+公开 [Hooks](https://zcode.z.ai/en/docs/hooks) 不提供完整运行时授权来源及当前模型句柄，因此完整功能需要宿主补丁。[插件规范](https://zcode.z.ai/en/docs/plugin)负责插件安装，不能代替宿主桥。0.1.3 需手动解压插件 ZIP 后添加本地 marketplace；移除随包 Node 后满足 GitHub 归档入口的单文件 50 MiB 限制，仓库地址安装尚未复验。凭据留在宿主，不传入插件。
 
 本次实测与已知限制见 [验收记录](../docs/desktop-acceptance.md)；SSH、WSL、远程工作区和其他桌面系统仍未验证。
 

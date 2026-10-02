@@ -21,6 +21,7 @@ async function fixture(t, { outcome = 'allow', failure, mode = 'build', disabled
   const workspace = await mkdtemp(path.join(tmpdir(), 'zcode-native-chain-'));
   const plugin = path.join(workspace, 'installed-plugin');
   await cp(sourcePlugin, plugin, { recursive: true });
+  const packagedHook = JSON.parse(await readFile(path.join(plugin, 'hooks/hooks.json'), 'utf8')).hooks.PermissionRequest[0].hooks[0];
   const selections = [], requests = [], events = [], retryBudgets = [], invocationContexts = [];
   let registered = false, firstClick;
   let executions = 0, humanRequests = 0, hookCalls = 0;
@@ -72,7 +73,7 @@ async function fixture(t, { outcome = 'allow', failure, mode = 'build', disabled
   const executionPort = createNodeExecutionAdapter();
   const hookRunner = createConfiguredHookRunner({ approvalBridgePort: bridge, executionPort, emitEvent: async event => events.push(event), getWorkingDirectory: () => workspace,
     config: { enabled: !disabled, maxOutputBytes: 32768, timeoutMs: 95000, events: { PermissionRequest: [{ matcher: '*', hooks: [{
-      type: 'process', command: process.execPath, args: [path.join(plugin, 'bin/permission-request.js')], timeoutMs: 95000,
+      ...packagedHook,
       plugin: { name: 'codex-auto-approval', id: 'codex-auto-approval@local', rootPath: plugin, dataPath: path.join(workspace, 'data') },
     }] }] } } });
   const registry = new ToolRegistryImpl();

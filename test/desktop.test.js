@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createNodeApprovalBridge } from '../host-adapter/upstream/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts';
@@ -24,13 +24,15 @@ async function fixture(t, complete = async () => ({ role: 'assistant', content: 
   return { workspace, state, lease, env, records, controller };
 }
 async function child(env, input = hook) {
+  const packagedHook = JSON.parse(await readFile('plugins/codex-auto-approval/hooks/hooks.json', 'utf8')).hooks.PermissionRequest[0].hooks[0];
+  const args = packagedHook.args.map(arg => arg.replaceAll('${ZCODE_PLUGIN_ROOT}', path.resolve('plugins/codex-auto-approval')));
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [path.resolve('plugins/codex-auto-approval/bin/permission-request.js')], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(packagedHook.command, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     proc.stdout.on('data', data => stdout += data);
     proc.stderr.on('data', data => stderr += data);
     proc.on('error', reject);
-    proc.on('exit', code => {
+    proc.on('close', code => {
       try { assert.equal(code, 0, stderr); resolve(JSON.parse(stdout)); } catch (error) { reject(error); }
     });
     proc.stdin.end(JSON.stringify(input));

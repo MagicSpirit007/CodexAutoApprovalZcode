@@ -24,7 +24,7 @@
 | Cyber 单拒熔断与 Codex 专用流程 | 未支持 | 首版只实现标准熔断；未移植 Cyber 专用模式、Codex 专用授权 UI 和 reviewer 服务 | 固定范围；不宣称等价 |
 | 私有多轮续接上下文 | 宿主适配 | 宿主按 binding / attempt 保存思考内容及供应商元数据，只用于同一审查的原生后续调用；visible prefix 校验防混用，重试／取消／失效／完成清理，不进入插件、主模型、界面或完整模型轨迹 | `host/core/src/runtime/helpers/approval-continuation.ts`；原生多轮隔离与真实 DeepSeek 文件调查 |
 | 审批模型调查工具 | 宿主适配 | 只开放工作区文件读取、目录调查；无 shell、写入和网络工具。工具集合小于 Codex | `src/tools.js`、`host/core/src/runtime/helpers/approval-bridge.ts`；边界读取与拒绝写工具测试 |
-| 独立安装、停用、卸载 | 宿主适配 | 标准 manifest、hooks、相对路径 marketplace；随包 Node、代码、策略，安装后无需源码目录；停用、卸载恢复原生审批 | `plugins/codex-auto-approval/`；原生 marketplace 干净安装及发现测试 |
+| 独立安装、停用、卸载 | 宿主适配 | 标准 manifest、hooks、相对路径 marketplace；随包代码和策略，要求系统 Node.js 22+ 加入 PATH，安装后无需源码目录；停用、卸载恢复原生审批 | `plugins/codex-auto-approval/`；原生 marketplace 干净安装及发现测试 |
 | 真实外部提供商 | 分路径验收 | 官方 DeepSeek Flash / High、GLM 主会话配合 DeepSeek 审查及 GLM 自身审查分别记录；本机替身、人工点击与其他供应商成功不证明 GLM 解除拦截 | [0.1.3 验收报告](desktop-acceptance.md)；0.1.2 历史证据保留 |
 | SSH、WSL、远程工作区 | 未实测 | 首版交付范围为本地 Windows 桌面；不自动同步插件到远端 | 固定范围 |
 | Codex OS 沙箱、网络代理、全部工具 | 未支持 | 使用 ZCode 宿主权限与工具边界；模型审批不提供 OS 隔离 | 固定范围 |

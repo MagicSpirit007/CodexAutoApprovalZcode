@@ -10,5 +10,4 @@ The upstream ZCode source is licensed under Apache License 2.0.
 This is an independent third-party adaptation, not an official OpenAI or ZCode release.
 
 Bundled third-party executables and libraries retain their own licenses.
-Node.js license: plugins/codex-auto-approval/runtime/LICENSE-node.txt.
 The Windows desktop distribution also includes Electron/Chromium license notices.

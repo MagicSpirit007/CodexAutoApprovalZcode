@@ -10,7 +10,9 @@
 
 0.1.3 增加独立审查模型配置，复用宿主供应商、原生协议适配器及密钥管理。指定后只调用所选模型，技术失败转人工。进度和完成记录显示实际审查模型。真实 DeepSeek 放行、拒绝和文件调查续接已通过；GLM 两条路径因原生账号凭据未解析成功停在准备阶段，本轮未验证原拦截是否解除。详见[验收报告](docs/desktop-acceptance.md)。
 
-## 安装：无需源码或另装 Node
+## 安装
+
+**环境要求：Windows x64、Node.js 22 或以上，且 `node` 已加入系统 `PATH`。** 插件使用系统 Node；在 PowerShell 中运行 `node --version` 确认版本为 v22 或以上。安装 Node 后退出并重新启动 ZCode，让桌面读取更新后的环境变量。
 
 ### 1. 下载并启动适配桌面
 
@@ -24,11 +26,11 @@
 
 在桌面 **设置 → 插件 → 创建 → 添加 marketplace** 中，选择**包含 marketplace.json 的解压目录**，然后安装并启用 **CodexAutoApproval**。不要直接选择 ZIP 文件，也不要选择其内部的插件子目录。
 
-插件包提供相对路径 marketplace、Windows Node 运行时、审批代码和策略；安装后不依赖解压目录或源码，也无需另装 Node。[ZCode 官方安装规范](https://zcode.z.ai/en/docs/plugin)支持本地 marketplace。
+插件包提供相对路径 marketplace、审批代码和策略，使用系统 Node.js；安装后不依赖解压目录或源码。[ZCode 官方安装规范](https://zcode.z.ai/en/docs/plugin)支持本地 marketplace。
 
 插件技术安装 ID 为 `codex-auto-approval@codex-auto-review-local`；保留它是为了兼容已有安装，显示名称为 CodexAutoApproval。
 
-**0.1.3 请使用上述本地安装方式。** 此版本宿主的 GitHub 归档安装器限制单文件 50 MiB，插件自带 node.exe 约 81 MiB，因此直接输入 GitHub 仓库地址的安装路线不适用于本版。仓库用于分发源码和 Release；不会要求用户自行构建。
+**0.1.3 请使用上述本地安装方式。** 本地插件 ZIP 已移除随包 Node，满足宿主归档安装器的单文件 50 MiB 限制；当前交付方式为本地 marketplace，仓库地址安装尚未复验。
 
 ### 3. 新建会话并选择权限选项
 
@@ -106,7 +108,7 @@ Get-FileHash .\CodexAutoApproval-plugin-0.1.3.zip -Algorithm SHA256
 
 ```text
 marketplace.json             本地安装入口（与插件 ZIP 一同提供）
-plugins/codex-auto-approval/  自包含 Windows 插件、Hook、运行时和策略
+plugins/codex-auto-approval/  Windows 插件、Hook 和策略；使用系统 Node.js
 src/                        可复用审批核心与桌面客户端
 prompts/                    默认风险策略与评估模板
 host-adapter/               固定 ZCode 提交的完整源码补丁与构建说明
@@ -130,6 +132,6 @@ npm run check
 
 ## 许可证与致谢
 
-本项目源码按 [Apache-2.0](LICENSE) 发布，保留 [NOTICE](NOTICE) 中的 OpenAI Codex 与 ZCode 来源说明。Windows 包中的 Electron、Chromium、Node 和其他第三方组件保留各自许可证；插件随包附有 Node 许可证。
+本项目源码按 [Apache-2.0](LICENSE) 发布，保留 [NOTICE](NOTICE) 中的 OpenAI Codex 与 ZCode 来源说明。Windows 桌面包中的 Electron、Chromium、Node 和其他第三方组件保留各自许可证。
 
 感谢 [OpenAI Codex](https://github.com/openai/codex)、[ZCode](https://github.com/zai-org/ZCode) 及其贡献者。

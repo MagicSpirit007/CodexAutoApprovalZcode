@@ -1,4 +1,4 @@
-"""Stage self-contained local delivery archives; never touches the original install."""
+"""Stage local delivery archives; plugins require system Node.js >=22 on PATH."""
 from pathlib import Path
 import hashlib
 import json
@@ -31,8 +31,7 @@ if manifest["version"] != "0.1.3" or metadata.get("bridgeProtocol") != 2:
     raise SystemExit("Delivery requires plugin 0.1.3 and bridge protocol 2")
 
 plugin_only = "--plugin-only" in sys.argv
-for required in [PLUGIN / "runtime/node.exe", PLUGIN / "runtime/LICENSE-node.txt",
-                 DESKTOP / "resources/glm/zcode.cjs", PATCH,
+for required in [DESKTOP / "resources/glm/zcode.cjs", PATCH,
                  ROOT / "docs/desktop-acceptance.md", CHECKS]:
     if plugin_only and required == DESKTOP / "resources/glm/zcode.cjs":
         continue
@@ -40,10 +39,16 @@ for required in [PLUGIN / "runtime/node.exe", PLUGIN / "runtime/LICENSE-node.txt
         raise SystemExit(f"Missing delivery input: {required}")
 MARKET.mkdir(parents=True, exist_ok=True)
 shutil.copy2(ROOT / "marketplace.json", MARKET / "marketplace.json")
-shutil.copytree(PLUGIN, MARKET / "plugins/codex-auto-approval", dirs_exist_ok=True, copy_function=copy_if_changed)
+staged_plugin = MARKET / "plugins/codex-auto-approval"
+if staged_plugin.exists():
+    shutil.rmtree(staged_plugin)
+shutil.copytree(PLUGIN, staged_plugin, copy_function=copy_if_changed,
+                ignore=shutil.ignore_patterns("runtime", "node_modules"))
 shutil.copytree(ROOT / "docs", MARKET / "docs", dirs_exist_ok=True)
 (MARKET / "INSTALL.md").write_text(
-    "# CodexAutoApproval 安装\n\n直接运行配套适配桌面的 ZCode.exe，打开本地工作区。"
+    "# CodexAutoApproval 安装\n\n环境要求：Windows x64，Node.js 22 或以上，并加入 PATH。"
+    "在 PowerShell 中运行 `node --version` 确认版本；安装 Node 后退出并重新启动桌面。\n\n"
+    "直接运行配套适配桌面的 ZCode.exe，打开本地工作区。"
     "在桌面插件市场添加本目录；安装并启用 CodexAutoApproval，"
     "新建会话，选择权限菜单中的 CodexAutoApproval。选择原生权限会在当前工作区停用本插件。\n\n停用或卸载可恢复原生人工审批。"
     "审批模型可在原生插件设置中选择跟随会话或指定模型；服务商凭据由原生服务商设置管理。\n\n"
@@ -68,7 +73,9 @@ desktop_zip = OUT / f"CodexAutoApproval-Windows-{version}.zip"
 archive(MARKET, plugin_zip)
 if not plugin_only:
     archive(DESKTOP, desktop_zip, "CodexAutoApproval-Windows/")
-files = [plugin_zip, OUT / PATCH.name, OUT / "ACCEPTANCE.md", OUT / "CHECKS.json"] + ([] if plugin_only else [desktop_zip])
+files = [plugin_zip, OUT / PATCH.name, OUT / "ACCEPTANCE.md", OUT / "CHECKS.json"]
+if desktop_zip.is_file():
+    files.append(desktop_zip)
 lines = []
 for file in files:
     with file.open("rb") as stream:

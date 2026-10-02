@@ -75,4 +75,6 @@ Codex 策略固定 d42056091aded7feb1d88ac7e83972108b2aa478，策略正文比较
 
 交付目录 artifacts/0.1.3/ 包含 CodexAutoApproval-Windows-0.1.3.zip、CodexAutoApproval-plugin-0.1.3.zip、zcode-29628c9-auto-review.patch、SHA256SUMS.txt、ACCEPTANCE.md 与 CHECKS.json。解压桌面后直接运行 ZCode.exe，再按 README 添加插件 ZIP 解压出的 marketplace。原版安装未覆盖；0.1.2 的桌面、插件、补丁、验收与校验文件五项 SHA256 保持不变，见 [rollback-preservation.json](evidence/0.1.3/rollback-preservation.json)。
 
+2026-10-02 后续调整：本地插件 ZIP 移除随包 Node，环境要求改为系统 Node.js 22 或以上加入 PATH，Hook 调用 `node`；安装 Node 后需重启桌面。重新打包并核验解压后的 Hook 能通过 PATH 启动，无宿主桥时返回 ask；47 项审批、模型及运行测试和 JavaScript / Python 语法检查通过。此前 Windows 界面及真实模型收据对应随包 Node 的产物；本次环境禁止本地 socket（EPERM），且不能启动 Windows 程序，因此未重新完成 Windows 界面和完整审批链路验收。
+
 本次权威收据位于 docs/evidence/0.1.3/；artifacts/0.1.3/acceptance/ 保留详细本地构建、回归和失败历史。旧报告和历史截图不作为 0.1.3 新证据。SSH、WSL 与远程工作区未验收。

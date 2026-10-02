@@ -1,10 +1,10 @@
 # CodexAutoApproval
 
-需要配套的本地 Windows 适配桌面构建，桥协议版本为 2。插件中的 `runtime/node.exe`、运行代码和策略都随包提供，安装后不依赖开发源码目录。
+环境要求：Windows x64、配套的适配桌面（桥协议版本 2）、Node.js 22 或以上，且 `node` 已加入系统 `PATH`。在 PowerShell 中运行 `node --version` 确认版本；安装 Node 后退出并重新启动桌面。插件提供运行代码和策略，使用系统 Node，安装后不依赖开发源码目录。
 
 把发行 ZIP 解压到任意目录，直接启动配套桌面的 `ZCode.exe`，打开一个本地工作区。进入「设置 → 插件 → 创建 → 添加 marketplace」，选择解压后含 `marketplace.json` 的目录，安装并启用 **CodexAutoApproval**，再新建会话，在权限菜单选择 **CodexAutoApproval**。内部安装 ID 仍为 `codex-auto-approval@codex-auto-review-local`，显示名称独立设置。
 
-配套新版 exe 已内置独立应用身份，无需 `Launch-AutoReview.cmd`。审批能力来自宿主的审批桥补丁；官方公开 Hook 不提供当前会话模型调用句柄。0.1.3 使用 Release 插件 ZIP 解压后的本地 marketplace 安装；宿主 GitHub 归档入口的单文件 50 MiB 限制小于随包 Node，不支持直接输入仓库地址安装。完整功能仍需兼容的宿主桥，不能标成原版安装即用。
+配套新版 exe 已内置独立应用身份，无需 `Launch-AutoReview.cmd`。审批能力来自宿主的审批桥补丁；官方公开 Hook 不提供当前会话模型调用句柄。0.1.3 使用插件 ZIP 解压后的本地 marketplace 安装；移除随包 Node 后满足宿主归档安装器的单文件 50 MiB 限制，仓库地址安装尚未复验。完整功能仍需兼容的宿主桥，不能标成原版安装即用。
 
 权限菜单中的 CodexAutoApproval 会启用本工作区插件，审批模型默认跟随当前会话，可在插件高级设置中从原生模型菜单单独指定供应商、模型与推理档位。用户默认可被工作区设置覆盖，保存后下一次审查生效。通过“管理模型”进入原生供应商界面配置自定义 Base URL、协议和 API Key；插件只保存模型引用，不保存密钥。选回原生「变更前确认」「自动编辑」或「完全访问」会先停用本工作区插件，再切换原生权限。「计划模式」仍是独立约束。启停适用于整个工作区，不影响其他工作区的设置；该工作区有任务运行时不可切换。
 

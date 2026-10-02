@@ -14,6 +14,7 @@ import { addMarketplace, installMarketplacePlugin, uninstallMarketplacePlugin } 
 import { getCurrentModelInvocationContext, ModelRetryBudget } from '../host-adapter/upstream/apps/zcode-cli/packages/contracts/dist/index.js';
 import { retryBudgetAllows, retryAttemptLoopContinues, retryBudgetMaxAttempts } from '../host-adapter/upstream/apps/zcode-cli/packages/adapters/dist/model/retry-budget.js';
 import { createModel } from '../host-adapter/upstream/apps/zcode-cli/packages/adapters/dist/model/model.js';
+import { AiSdkModelAdapterError } from '../host-adapter/upstream/apps/zcode-cli/packages/adapters/dist/model/errors.js';
 
 const sourcePlugin = path.resolve('plugins/codex-auto-approval');
 const assess = outcome => JSON.stringify({ outcome, risk_level: outcome === 'allow' ? 'low' : 'high', user_authorization: 'high', rationale: 'Native test policy result' });
@@ -49,6 +50,9 @@ async function fixture(t, { outcome = 'allow', failure, mode = 'build', disabled
           if (delay) await new Promise((resolve, reject) => {
             const timer = setTimeout(resolve, delay);
             request.abortSignal.addEventListener('abort', () => { clearTimeout(timer); reject(request.abortSignal.reason); }, { once: true });
+          });
+          if (failure === 'provider_request_blocked') throw new AiSdkModelAdapterError('model_request_failed', 'request has been blocked due to unusual activity.', {
+            context: { statusCode: 405, requestId: 'native-block-request', retryable: false },
           });
           if (failure) throw Object.assign(new Error(failure), { code: failure });
           if (streamError) yield { type: 'error', error: { name: 'ProviderBusinessError', message: 'request has been blocked due to unusual activity.' } };
@@ -279,6 +283,36 @@ test('review failure registers the manual receiver before publication; first and
   const f = await fixture(t, { failure: 'authentication', clickImmediately: true });
   assert.equal((await f.execute()).success, true);
   assert.equal(f.counts().executions, 1);
+  assert.equal(f.counts().humanRequests, 1);
+});
+
+test('native interception asks once without execution or policy denial and survives replay', async t => {
+  const f = await fixture(t, { failure: 'provider_request_blocked' });
+  assert.equal((await f.execute()).success, false);
+  assert.equal(f.counts().executions, 0);
+  assert.equal(f.counts().hookCalls, 1);
+  assert.equal(f.counts().humanRequests, 1);
+  const requested = f.events.find(event => event.type === 'permission_requested').payload;
+  assert.equal(requested.reviewFailure.code, 'provider_request_blocked');
+  assert.equal(requested.reviewFailure.httpStatus, 405);
+  assert.equal(requested.reviewFailure.requestId, 'native-block-request');
+  assert.equal(requested.reviewFailure.retryable, false);
+  const completed = f.events.find(event => event.type === 'permission_review_completed');
+  assert.equal(completed.payload.outcome, 'failed');
+  assert.deepEqual(completed.payload.reviewFailure, requested.reviewFailure);
+  const { projectPermissionReview } = await import('../host-adapter/upstream/apps/zcode-cli/packages/bootstrap/dist/zcode-protocol-v4/product-projection-permission-review.js');
+  const row = { rowId: 'block-row', kind: 'toolCall', toolCallId: completed.payload.toolCallId, toolName: 'ApprovalProbe', status: 'running', inputText: '' };
+  const started = f.events.find(event => event.type === 'permission_review_started');
+  const projected = projectPermissionReview(completed, projectPermissionReview(started, row)[0].row)[0].row;
+  assert.equal(projected.permissionReview.status, 'failed');
+  assert.deepEqual(projected.permissionReview.reviewFailure, requested.reviewFailure);
+});
+
+test('manual first and duplicate clicks after provider interception execute once', async t => {
+  const f = await fixture(t, { failure: 'provider_request_blocked', clickImmediately: true });
+  assert.equal((await f.execute()).success, true);
+  assert.equal(f.counts().executions, 1);
+  assert.equal(f.counts().hookCalls, 1);
   assert.equal(f.counts().humanRequests, 1);
 });
 for (const [name, options, code] of [

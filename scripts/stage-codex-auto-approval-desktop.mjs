@@ -10,7 +10,7 @@ const upstream = resolve(root, 'host-adapter/upstream');
 if (!process.argv[2]) throw new Error('Provide the original ZCode 3.14.4 Windows installation directory.');
 const original = resolve(process.argv[2]);
 const output = resolve(process.argv[4] ?? resolve(root, 'artifacts/0.1.3/CodexAutoApproval-Windows'));
-const staging = resolve(root, 'artifacts/0.1.3/acceptance/asar-staging');
+const staging = resolve(process.argv[6] ?? resolve(dirname(output), 'acceptance/asar-staging'));
 const digest = async file => createHash('sha256').update(await readFile(file)).digest('hex');
 await mkdir(staging, { recursive: true });
 console.log('Extracting original desktop archive');
@@ -36,9 +36,14 @@ await rm(resolve(output, 'resources/app.asar.next'), { force: true });
 await rm(resolve(output, 'resources/app.asar.next.unpacked'), { recursive: true, force: true });
 const agent = resolve(upstream, 'apps/zcode-cli/packages/cli/dist/zcode.cjs');
 await cp(agent, resolve(output, 'resources/glm/zcode.cjs'));
+await cp(resolve(upstream, 'packages/desktop/bundled-agents/win32-x64/glm/packages'), resolve(output, 'resources/glm/packages'), { recursive: true });
+await cp(resolve(upstream, 'apps/zcode-cli/packages/cli/dist/provider'), resolve(output, 'resources/glm/provider'), { recursive: true });
 const version = JSON.parse(await readFile(resolve(root, 'plugins/codex-auto-approval/.zcode-plugin/plugin.json'), 'utf8')).version;
 const metadata = {
   distribution: 'CodexAutoApproval-local-portable-host-adapter', pluginVersion: version,
+  buildVariant: process.argv[5] ?? 'standard',
+  buildDate: new Date().toISOString(), electronAssetSource: 'official-installed-Windows-3.14.4-resources',
+  responsesReviewStatelessContinuation: process.argv[5] === 'responses-fix-20261002',
   electronAssetSourceVersion: '3.14.4', desktopSourceVersion: '3.14.3', agentSourceVersion: '3.14.3',
   upstreamCommit: '29628c9acdb81b703bbd4080c207a0e7ce5e276e',
   codexCommit: 'd42056091aded7feb1d88ac7e83972108b2aa478', bridgeProtocol: 2,
@@ -46,7 +51,7 @@ const metadata = {
   originalAgentSha256: await digest(resolve(original, 'resources/glm/zcode.cjs')),
   adaptedAgentSha256: await digest(agent), originalDesktopAsarSha256: await digest(resolve(original, 'resources/app.asar')),
   adaptedDesktopAsarSha256: await digest(resolve(output, 'resources/app.asar')),
-  changes: ['Bridge v2 with independently configured native review model and private tool continuation', 'PermissionRequest ask/interrupt',
+  changes: [...(process.argv[5] === 'responses-fix-20261002' ? ['Automatic review Responses uses store=false, full tool call/result pairing and encrypted reasoning continuation'] : []), 'Bridge v2 with independently configured native review model and private tool continuation', 'PermissionRequest ask/interrupt',
     'CodexAutoApproval permission radio option using native workspace plugin settings', 'Direct exe startup with independent application identity'],
 };
 await writeFile(resolve(output, 'AUTO-REVIEW-BUILD.json'), JSON.stringify(metadata, null, 2) + '\n');

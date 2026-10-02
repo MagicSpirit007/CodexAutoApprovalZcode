@@ -1,0 +1,30 @@
+{
+  "mode": "live",
+  "completed": true,
+  "profileRemoved": true,
+  "scenarios": [
+    {
+      "name": "live-one",
+      "requests": 2,
+      "mainRequests": 2,
+      "continuations": 1,
+      "returnedCalls": 2,
+      "encryptedRestored": false,
+      "protocolError": false,
+      "httpError": false,
+      "completed": true,
+      "reasoningPresent": true,
+      "modelMatched": true,
+      "executions": 1
+    }
+  ],
+  "stage": "probe-wait",
+  "pageErrors": 0,
+  "agentSha256": "6e24be474b337b51267e4813dda304411f9696b4efef921e84cafc12923b282e",
+  "desktopAsarSha256": "acf9813dcd88bf5b022692ae3103bda4f0071293b70ef4044f32a34805f22ec1",
+  "reviewModel": "deepseek-v4-flash",
+  "reasoningLevel": "max",
+  "userConfigUnchanged": true,
+  "appExitCode": 1,
+  "appExitSignal": null
+}

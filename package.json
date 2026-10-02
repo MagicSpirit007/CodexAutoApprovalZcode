@@ -12,10 +12,13 @@
   },
   "scripts": {
     "start": "node bin/zcode.js",
-    "test": "node --test test/approval.test.js test/cli.test.js test/model.test.js test/runtime.test.js",
+    "test": "node --test test/approval.test.js test/cli.test.js test/model.test.js test/runtime.test.js test/clone-chat-review-config.test.js test/responses-acceptance-protocol.test.js",
     "test:desktop": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/desktop.test.js test/host-chain.test.js",
     "package:desktop": "node scripts/package-desktop.mjs",
-    "check": "node scripts/check.js"
+    "check": "node scripts/check.js",
+    "test:approval-ui": "node ./host-adapter/upstream/node_modules/tsx/dist/cli.mjs --tsconfig ./host-adapter/upstream/packages/ui/tsconfig.json --test test/approval-failure-ui.test.js",
+    "test:responses": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/responses-options.test.js test/responses-continuation.test.js",
+    "test:responses-live": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs scripts/responses-live-review.mjs"
   },
   "license": "Apache-2.0",
   "repository": {

@@ -7,6 +7,8 @@ import path from 'node:path';
 import { createNodeApprovalBridge } from '../host-adapter/upstream/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts';
 import { DesktopBridgeClient } from '../src/desktop-client.js';
 import { reviewDesktopPermission } from '../src/desktop-hook.js';
+import { AiSdkModelAdapterError } from '../host-adapter/upstream/apps/zcode-cli/packages/adapters/src/model/errors.ts';
+import { ProviderBusinessError } from '../host-adapter/upstream/apps/zcode-cli/packages/adapters/src/model/model-execution.ts';
 
 const assessment = outcome => ({ outcome, risk_level: outcome === 'allow' ? 'low' : 'high', user_authorization: 'high', rationale: 'Mock policy rationale' });
 const decision = output => output.hookSpecificOutput.decision;
@@ -155,4 +157,61 @@ test('sanitized diagnostics retain safe HTTP/business/retry details and strip se
   assert.equal(failure.businessCode,'1309');assert.equal(failure.httpStatus,401);assert.equal(failure.requestId,'safe-request');
   assert.equal(failure.retryAfterMs,90000);assert.equal(failure.retryable,false);
   assert.doesNotMatch(JSON.stringify(failure),/HIDDEN_BARE|PRIVATE|RAW_BODY|provider.example|unsafe stack/);
+});
+
+for (const [message, statusCode, expectedCode, retryable] of [
+  ['request has been blocked due to unusual activity.', 405, 'provider_request_blocked', false],
+  ['Method Not Allowed', 405, 'model_request_failed', false],
+  ['Invalid credentials', 401, 'model_request_failed', false],
+  ['Temporary upstream failure', 503, 'model_request_failed', true],
+]) test(`native adapter diagnostics survive approval bridge: ${statusCode} ${expectedCode}`, async t => {
+  let calls = 0;
+  const f = await fixture(t, async () => {
+    calls++;
+    throw new AiSdkModelAdapterError('model_request_failed', message, { context: {
+      statusCode, retryable, requestId: 'request-safe', providerErrorCode: 'provider-safe',
+      headers: { authorization: 'Bearer PRIVATE' }, responseBody: 'PRIVATE_BODY',
+    } });
+  });
+  const output = await child(f.env);
+  const failure = decision(output).reviewFailure;
+  assert.equal(decision(output).behavior, 'ask');
+  assert.equal(failure.code, expectedCode);
+  assert.equal(failure.message, message);
+  assert.equal(failure.httpStatus, statusCode);
+  assert.equal(failure.requestId, 'request-safe');
+  assert.equal(failure.businessCode, 'provider-safe');
+  assert.equal(failure.retryable, retryable);
+  assert.equal(calls, retryable ? 3 : 1);
+  assert.equal(decision(f.lease.finish(output)).behavior, 'ask');
+  assert.equal(f.records.length, 0);
+  assert.doesNotMatch(JSON.stringify(output), /PRIVATE/);
+});
+
+test('untrusted context is not used as native provider evidence', async t => {
+  const f = await fixture(t, async () => { throw Object.assign(new Error('request has been blocked due to unusual activity.'), {
+    context: { statusCode: 405, requestId: 'untrusted' },
+  }); });
+  const failure = decision(await child(f.env)).reviewFailure;
+  assert.equal(failure.code, 'review_error');
+  assert.equal(failure.httpStatus, undefined);
+  assert.equal(failure.requestId, undefined);
+});
+
+for (const nested of [false, true]) test(`explicit native business interception stays blocked (nested=${nested})`, async t => {
+  const business = new ProviderBusinessError({ providerCode: 'unusual_activity', providerId: 'fixture', providerKind: 'anthropic',
+    providerMessage: 'request has been blocked due to unusual activity.', statusCode: 405, responseStatus: 405,
+    providerRequestId: 'business-request', responseBodySummary: {} });
+  let calls = 0;
+  const f = await fixture(t, async () => { calls++; throw nested ? new AiSdkModelAdapterError('model_request_failed', business.message, {
+    cause: business, context: { statusCode: 405, requestId: 'host-request', retryable: false },
+  }) : business; });
+  const output = await child(f.env);
+  assert.equal(decision(output).reviewFailure.code, 'provider_request_blocked');
+  assert.equal(decision(output).reviewFailure.httpStatus, 405);
+  assert.equal(decision(output).reviewFailure.requestId, 'business-request');
+  assert.equal(decision(output).reviewFailure.retryable, false);
+  assert.equal(decision(output).behavior, 'ask');
+  assert.equal(calls, 1);
+  assert.equal(f.records.length, 0);
 });

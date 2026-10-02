@@ -4,11 +4,16 @@ import hashlib
 import json
 import subprocess
 import tempfile
+import argparse
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST = ROOT / "host-adapter/upstream"
 CODEX = ROOT.parent / "codex"
-OUT = ROOT / "artifacts/0.1.3/acceptance"
+parser = argparse.ArgumentParser()
+parser.add_argument("--out", type=Path, default=ROOT / "artifacts/0.1.3/acceptance")
+parser.add_argument("--patch", type=Path, default=ROOT / "host-adapter/zcode-29628c9-auto-review.patch")
+args = parser.parse_args()
+OUT = args.out.resolve()
 OUT.mkdir(parents=True, exist_ok=True)
 def git(cwd, *args):
     return subprocess.check_output(["git", *args], cwd=cwd)
@@ -26,7 +31,7 @@ assert normalize(policy_source) == normalize(policy_copy), "Policy body differs 
 
 commit = git(HOST, "rev-parse", "HEAD").decode().strip()
 assert commit == "29628c9acdb81b703bbd4080c207a0e7ce5e276e"
-patch = ROOT / "host-adapter/zcode-29628c9-auto-review.patch"
+patch = args.patch.resolve()
 tracked = git(HOST, "diff", "--name-only").decode().splitlines()
 added = git(HOST, "ls-files", "--others", "--exclude-standard").decode().splitlines()
 with tempfile.TemporaryDirectory(prefix="zcode-clean-patch-") as temporary:

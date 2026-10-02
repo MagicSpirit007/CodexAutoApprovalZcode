@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-02T10:30:30.085Z",
+  "runner": "v22.19.0",
+  "isolatedProfileCleaned": true,
+  "records": [
+    {
+      "label": "windows-node-help",
+      "status": 0
+    },
+    {
+      "label": "electron-runtime",
+      "status": 0
+    },
+    {
+      "label": "electron-agent-help",
+      "status": 0
+    }
+  ]
+}

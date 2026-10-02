@@ -1,0 +1,18 @@
+{
+  "stage": "finalize",
+  "liveAttempted": false,
+  "completed": false,
+  "providerLocked": true,
+  "modelLocked": true,
+  "reasoningLevel": "max",
+  "examples": [],
+  "cleaned": true,
+  "nativeResolveStep": "registry-start",
+  "failure": {
+    "stage": "native-resolve",
+    "code": "review_error",
+    "errorClass": "TypeError",
+    "safeSource": "provider-config.ts:404"
+  },
+  "configurationUnchanged": true
+}

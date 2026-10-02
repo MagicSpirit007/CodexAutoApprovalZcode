@@ -135,6 +135,74 @@ index 9d90122..d3c23ec 100644
        source: "generateText",
        toolCallId: id,
        toolCallIndex: index,
+diff --git a/apps/zcode-cli/packages/adapters/src/model/runner-options.ts b/apps/zcode-cli/packages/adapters/src/model/runner-options.ts
+index b1aa73b..3d432b2 100644
+--- a/apps/zcode-cli/packages/adapters/src/model/runner-options.ts
++++ b/apps/zcode-cli/packages/adapters/src/model/runner-options.ts
+@@ -1,4 +1,5 @@
+ import { Output, jsonSchema } from "ai";
++import { approvalResponsesOptions } from "./approval-responses-options.js";
+ import type { ModelToolChoice } from "@zcode/contracts";
+ import type { EnvRecord } from "./model-execution.js";
+ import { toAiSdkMessages } from "./transform.js";
+@@ -41,10 +42,13 @@ export function createGenerateTextOptions(input: {
+   resolved: ResolvedAiSdkModel;
+   statusContext: ModelStatusContext;
+ }): AiSdkGenerateTextOptions {
+-  const providerOptions = mergeProviderOptions(
+-    input.resolved.providerOptions,
+-    input.request.providerOptions,
+-  );
++  const providerOptions = approvalResponsesOptions({
++    querySource: input.statusContext.querySource,
++    providerKind: input.resolved.providerKind,
++    base: input.resolved.providerOptions,
++    override: input.request.providerOptions,
++    merged: mergeProviderOptions(input.resolved.providerOptions, input.request.providerOptions),
++  });
+   const providerOptionsWithMetadata = mergeAnthropicRequestMetadata({
+     metadataUserId: input.anthropicMetadataUserId,
+     providerKind: input.resolved.providerKind,
+@@ -58,8 +62,8 @@ export function createGenerateTextOptions(input: {
+   return removeUndefined({
+     model: input.resolved.model,
+     messages: toAiSdkMessages(input.request.messages, {
+-      apiFormat: resolveProviderApiFormat(providerOptions),
+-      providerOptions,
++      apiFormat: resolveProviderApiFormat(requestProviderOptions),
++      providerOptions: requestProviderOptions,
+       providerKind: input.resolved.providerKind,
+       inputFormat: input.resolved.properties?.inputFormat,
+     }),
+@@ -107,10 +111,13 @@ export function createStreamTextOptions(input: {
+   resolved: ResolvedAiSdkModel;
+   statusContext: ModelStatusContext;
+ }): AiSdkStreamTextOptions {
+-  const providerOptions = mergeProviderOptions(
+-    input.resolved.providerOptions,
+-    input.request.providerOptions,
+-  );
++  const providerOptions = approvalResponsesOptions({
++    querySource: input.statusContext.querySource,
++    providerKind: input.resolved.providerKind,
++    base: input.resolved.providerOptions,
++    override: input.request.providerOptions,
++    merged: mergeProviderOptions(input.resolved.providerOptions, input.request.providerOptions),
++  });
+   const requestProviderOptions = mergeAnthropicRequestMetadata({
+     metadataUserId: input.anthropicMetadataUserId,
+     providerKind: input.resolved.providerKind,
+@@ -119,8 +126,8 @@ export function createStreamTextOptions(input: {
+   return removeUndefined({
+     model: input.resolved.model,
+     messages: toAiSdkMessages(input.request.messages, {
+-      apiFormat: resolveProviderApiFormat(providerOptions),
+-      providerOptions,
++      apiFormat: resolveProviderApiFormat(requestProviderOptions),
++      providerOptions: requestProviderOptions,
+       providerKind: input.resolved.providerKind,
+       inputFormat: input.resolved.properties?.inputFormat,
+     }),
 diff --git a/apps/zcode-cli/packages/adapters/src/model/transform.ts b/apps/zcode-cli/packages/adapters/src/model/transform.ts
 index 18c6afe..d799a1a 100644
 --- a/apps/zcode-cli/packages/adapters/src/model/transform.ts
@@ -1386,10 +1454,18 @@ index 268ff83..29c88d9 100644
    taskId: string;
    traceId: TraceId;
 diff --git a/packages/ui/src/PermissionDialog.tsx b/packages/ui/src/PermissionDialog.tsx
-index c78c5bd..7110cf5 100644
+index c78c5bd..98d753f 100644
 --- a/packages/ui/src/PermissionDialog.tsx
 +++ b/packages/ui/src/PermissionDialog.tsx
-@@ -696,14 +696,18 @@ export function PermissionDialog({
+@@ -47,6 +47,7 @@ import { isSaveWorkflowToolCall } from "@/lib/workflowToolNames.js";
+ import { useZCodeStoreWithDefault } from "@/store/StoreProvider.js";
+ import { DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
+ import { useZCodeIntl } from "./i18n/IntlProvider.js";
++import { ApprovalReviewFailureNotice } from "./components/ApprovalReviewFailureNotice.js";
+ import { Info, LoaderIcon, WrenchIcon } from "lucide-react";
+ 
+ const MCP_PERMISSION_TOOL_ICON = <WrenchIcon className="size-4 shrink-0 text-foreground-subtle" />;
+@@ -696,14 +697,16 @@ export function PermissionDialog({
            <div className="space-y-4">
              <div className="flex flex-wrap items-center gap-2">
                <p className="text-ui-base font-medium leading-tight text-foreground-subtle">
@@ -1403,14 +1479,12 @@ index c78c5bd..7110cf5 100644
              !shouldUseSaveWorkflowBlock &&
 -            displayReason ? (
 +            request.reviewFailure ? (
-+              <p className="text-ui-base leading-5 text-foreground" data-testid="auto-review-failure">
-+                {request.reviewFailure.code}: {request.reviewFailure.message}
-+              </p>
++              <ApprovalReviewFailureNotice failure={request.reviewFailure} intl={intl} />
 +            ) : displayReason ? (
                <p className="text-ui-base leading-5 text-foreground">{displayReason}</p>
              ) : null}
              {shouldUseSwitchModePlaceholder ? (
-@@ -731,7 +735,7 @@ export function PermissionDialog({
+@@ -731,7 +734,7 @@ export function PermissionDialog({
            <div className="space-y-1">
              <div
                role="listbox"
@@ -1432,7 +1506,7 @@ index 554b0d5..39d80a6 100644
                              initialScopeKey={pluginScopeKey}
                              workspacePath={activeWorkspacePath}
 diff --git a/packages/ui/src/i18n/locales/en-US.ts b/packages/ui/src/i18n/locales/en-US.ts
-index 4ec0bc4..44dfebc 100644
+index 4ec0bc4..08cfcee 100644
 --- a/packages/ui/src/i18n/locales/en-US.ts
 +++ b/packages/ui/src/i18n/locales/en-US.ts
 @@ -4164,6 +4164,11 @@ const enUS: Record<string, string> = {
@@ -1447,7 +1521,7 @@ index 4ec0bc4..44dfebc 100644
    "settings.plugins.config.title": "Configuration",
    "settings.plugins.config.required": "Required",
    "settings.plugins.config.save": "Save configuration",
-@@ -5786,6 +5791,15 @@ const enUS: Record<string, string> = {
+@@ -5786,6 +5791,18 @@ const enUS: Record<string, string> = {
    "chat.quota.action.refresh": "Refresh quota",
  
    // Permissions
@@ -1460,11 +1534,14 @@ index 4ec0bc4..44dfebc 100644
 +  "chat.permission.reviewReasoning": "Reasoning",
 +  "chat.permission.autoReviewing": "Reviewing automatically",
 +  "chat.permission.autoReviewFailed": "Automatic review failed; manual confirmation required",
++  "chat.permission.autoReviewHttpStatus": "HTTP status: {status}",
++  "chat.permission.autoReviewRequestId": "Request ID: {requestId}",
++  "chat.permission.autoReviewProviderBlocked": "The provider blocked the automatic review request. The review could not complete, and the pending action has not run. Handle it manually here, or select an independent reviewer in Settings > Plugins > CodexAutoApproval > Advanced details > Review model. Changing models does not guarantee removal of the provider restriction.",
    "chat.permission.title": "Permission required",
    "chat.permission.awaitingApproval": "Awaiting approval",
    "chat.permission.approve": "Allow",
 diff --git a/packages/ui/src/i18n/locales/zh-CN.ts b/packages/ui/src/i18n/locales/zh-CN.ts
-index 63b5482..09a7290 100644
+index 63b5482..e5ffc62 100644
 --- a/packages/ui/src/i18n/locales/zh-CN.ts
 +++ b/packages/ui/src/i18n/locales/zh-CN.ts
 @@ -3896,6 +3896,10 @@ const zhCN: Record<string, string> = {
@@ -1478,7 +1555,7 @@ index 63b5482..09a7290 100644
    "settings.plugins.config.title": "配置",
    "settings.plugins.config.required": "必填",
    "settings.plugins.config.save": "保存配置",
-@@ -5529,6 +5533,15 @@ const zhCN: Record<string, string> = {
+@@ -5529,6 +5533,18 @@ const zhCN: Record<string, string> = {
    "chat.quota.action.refresh": "刷新额度",
  
    // 权限请求
@@ -1491,6 +1568,9 @@ index 63b5482..09a7290 100644
 +  "chat.permission.reviewReasoning": "推理档位",
 +  "chat.permission.autoReviewing": "正在自动审查",
 +  "chat.permission.autoReviewFailed": "自动审查失败，需人工确认",
++  "chat.permission.autoReviewHttpStatus": "HTTP 状态码：{status}",
++  "chat.permission.autoReviewRequestId": "请求编号：{requestId}",
++  "chat.permission.autoReviewProviderBlocked": "供应商拦截了自动审查请求，审查未完成，待审批动作尚未执行。您可以在此人工处理，或前往 设置 > 插件 > CodexAutoApproval > 高级信息 > 审查模型，指定独立的审查模型。更换模型不保证解除供应商限制。",
    "chat.permission.title": "需要权限",
    "chat.permission.awaitingApproval": "等待确认",
    "chat.permission.approve": "允许",
@@ -1853,10 +1933,10 @@ index 5054742..7ff6c29 100644
      options,
 diff --git a/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts b/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts
 new file mode 100755
-index 0000000..0a51e67
+index 0000000..fc52daf
 --- /dev/null
 +++ b/apps/zcode-cli/packages/adapters/src/exec/approval-bridge.ts
-@@ -0,0 +1,201 @@
+@@ -0,0 +1,191 @@
 +import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 +import { chmod, mkdtemp, rm } from "node:fs/promises";
 +import { createServer, type Socket } from "node:net";
@@ -1865,8 +1945,7 @@ index 0000000..0a51e67
 +import { approvalReviewFailure } from "@zcode/contracts";
 +import type { ApprovalBridgeFactory, ApprovalBridgeOwner, ApprovalBridgePort, HookPluginContext, HookJSONOutput } from "@zcode/contracts";
 +
-+import { classifyModelFailure, inspectProviderFailure } from "../model/failure-classifier.js";
-+import { getResponseHeaders } from "../model/failure-inspection.js";
++import { normalizeApprovalReviewFailure } from "./approval-review-failure.js";
 +
 +const MAX_FRAME = 2 * 1024 * 1024;
 +const signature = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -1996,16 +2075,7 @@ index 0000000..0a51e67
 +        if (Buffer.byteLength(JSON.stringify(result)) > MAX_FRAME) throw fault("input_budget", "Approval reply exceeds budget");
 +        return { id, result };
 +      } catch (error) {
-+        const e = error as Error & { code?: string; retryable?: boolean };
-+        const classified = classifyModelFailure(e);
-+        const details = inspectProviderFailure(e);
-+        const headers = getResponseHeaders(e);
-+        return { id, error: approvalReviewFailure({ ...e, code: e.code, name: e.name, message: e.message,
-+          businessCode: details.providerErrorCode ?? (e as { businessCode?: string }).businessCode,
-+          httpStatus: classified.statusCode ?? (e as { httpStatus?: number }).httpStatus,
-+          requestId: details.providerRequestId ?? headers?.["x-request-id"] ?? headers?.["request-id"] ?? (e as { requestId?: string }).requestId,
-+          retryAfterMs: classified.retryAfterMs ?? (e as { retryAfterMs?: number }).retryAfterMs,
-+          retryable: e.retryable ?? classified.retryable }) };
++        return { id, error: normalizeApprovalReviewFailure(error) };
 +      }
 +    }
 +    try {
@@ -2121,6 +2191,99 @@ index 0000000..e946393
 +      return { ...snapshot, actualReviewSelection, reviewConfigurationVersion: revision };
 +    },
 +  });
++}
+diff --git a/apps/zcode-cli/packages/adapters/src/exec/approval-review-failure.ts b/apps/zcode-cli/packages/adapters/src/exec/approval-review-failure.ts
+new file mode 100755
+index 0000000..e618f18
+--- /dev/null
++++ b/apps/zcode-cli/packages/adapters/src/exec/approval-review-failure.ts
+@@ -0,0 +1,30 @@
++import { approvalReviewFailure, type ApprovalReviewFailure } from "@zcode/contracts";
++import { AiSdkModelAdapterError } from "../model/errors.js";
++import { classifyModelFailure, inspectProviderFailure } from "../model/failure-classifier.js";
++import { getResponseHeaders } from "../model/failure-inspection.js";
++
++const EXPLICIT_PROVIDER_BLOCK = /^request has been blocked due to unusual activity\.?$/i;
++
++/** Existing host boundary owns the only provider-to-review error conversion. */
++export function normalizeApprovalReviewFailure(error: unknown): ApprovalReviewFailure {
++  const value = error as Error & Partial<ApprovalReviewFailure> & { providerCode?: string | number; providerRequestId?: string; statusCode?: number; responseStatus?: number };
++  const classified = classifyModelFailure(error);
++  const details = inspectProviderFailure(error);
++  const headers = getResponseHeaders(error);
++  // 原生 adapter 将诊断保存在 context；只取已知字段，不能展开私有请求或响应。
++  const context = error instanceof AiSdkModelAdapterError ? error.context : undefined;
++  const httpStatus = classified.statusCode ?? value?.httpStatus ?? value?.responseStatus ?? value?.statusCode ?? context?.statusCode;
++  const providerEvidence = error instanceof AiSdkModelAdapterError || details.providerErrorCode !== undefined || classified.statusCode !== undefined;
++  // 405 本身并不代表风控；只认供应商明确返回的拦截说明，不伪装主会话或追加重试。
++  const blocked = providerEvidence && typeof value?.message === "string" && EXPLICIT_PROVIDER_BLOCK.test(value.message.trim());
++  return approvalReviewFailure({
++    code: blocked ? "provider_request_blocked" : value?.code,
++    name: blocked ? undefined : value?.name,
++    message: value?.message,
++    businessCode: details.providerErrorCode ?? value?.businessCode ?? value?.providerCode ?? context?.providerErrorCode,
++    httpStatus,
++    requestId: details.providerRequestId ?? headers?.["x-request-id"] ?? headers?.["request-id"] ?? value?.requestId ?? value?.providerRequestId ?? context?.requestId,
++    retryAfterMs: classified.retryAfterMs ?? value?.retryAfterMs ?? context?.retryAfterMs,
++    retryable: blocked ? false : value?.retryable ?? (typeof context?.retryable === "boolean" ? context.retryable : classified.retryable),
++  });
++}
+diff --git a/apps/zcode-cli/packages/adapters/src/model/approval-responses-options.ts b/apps/zcode-cli/packages/adapters/src/model/approval-responses-options.ts
+new file mode 100755
+index 0000000..a84ff9c
+--- /dev/null
++++ b/apps/zcode-cli/packages/adapters/src/model/approval-responses-options.ts
+@@ -0,0 +1,51 @@
++import { ModelErrorCode } from "@zcode/contracts";
++import { AiSdkModelAdapterError } from "./errors.js";
++
++const RESPONSES_API_FORMAT = "openai-responses";
++const ENCRYPTED_REASONING_INCLUDE = "reasoning.encrypted_content";
++const record = (value: unknown): Record<string, unknown> =>
++  value !== null && typeof value === "object" && !Array.isArray(value)
++    ? (value as Record<string, unknown>)
++    : {};
++
++/** Apply review-only statelessness at the native request-option boundary. */
++export function approvalResponsesOptions(input: {
++  querySource?: string;
++  providerKind?: string;
++  base?: Record<string, unknown>;
++  override?: Record<string, unknown>;
++  merged?: Record<string, unknown>;
++}): Record<string, unknown> | undefined {
++  // 必须依据已解析协议与归因命中；请求选项不能伪造协议而影响主会话或其他接口。
++  if (
++    input.querySource !== "auto_review" ||
++    input.providerKind !== "openai" ||
++    input.base?.apiFormat !== RESPONSES_API_FORMAT
++  )
++    return input.merged;
++  const base = record(input.base?.openai);
++  const override = record(input.override?.openai);
++  const includes = [base.include, override.include].flatMap((value) => {
++    if (value === undefined || value === null) return [];
++    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
++      throw new AiSdkModelAdapterError(
++        ModelErrorCode.InvalidModelRequest,
++        "Review Responses include must be an array of strings",
++      );
++    }
++    return value as string[];
++  });
++  const openai = { ...base, ...override };
++  // 审查历史只由 ApprovalContinuation 持有；服务器选择器会漏掉本地完整工具调用。
++  delete openai.previousResponseId;
++  delete openai.conversation;
++  return {
++    ...input.merged,
++    apiFormat: RESPONSES_API_FORMAT,
++    openai: {
++      ...openai,
++      store: false,
++      include: [...new Set([...includes, ENCRYPTED_REASONING_INCLUDE])],
++    },
++  };
 +}
 diff --git a/apps/zcode-cli/packages/bootstrap/src/app/approval-review-selection.ts b/apps/zcode-cli/packages/bootstrap/src/app/approval-review-selection.ts
 new file mode 100755
@@ -2539,57 +2702,108 @@ index 0000000..35b6862
 +}
 diff --git a/apps/zcode-cli/packages/core/src/runtime/helpers/approval-continuation.ts b/apps/zcode-cli/packages/core/src/runtime/helpers/approval-continuation.ts
 new file mode 100755
-index 0000000..311ba6e
+index 0000000..dccf103
 --- /dev/null
 +++ b/apps/zcode-cli/packages/core/src/runtime/helpers/approval-continuation.ts
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,101 @@
 +import type { ModelInputMessage, ModelReasoningContentBlock } from "@zcode/contracts";
 +
 +type Continuation = { attempt: number; visible: unknown[]; native: ModelInputMessage[] };
-+const fault = (message: string) => Object.assign(new Error(message), { code: "invalid_continuation" });
++const fault = (message: string) =>
++  Object.assign(new Error(message), { code: "invalid_continuation" });
 +
 +/** Private runtime state; visible messages are its sole transport capability. */
 +export class ApprovalContinuation {
 +  readonly #bindings = new Map<string, Continuation>();
 +
-+  clear(bindingId: string): void { this.#bindings.delete(bindingId); }
++  clear(bindingId: string): void {
++    this.#bindings.delete(bindingId);
++  }
 +
-+  restore(bindingId: string, attempt: number, visible: unknown[], parsed: ModelInputMessage[]): ModelInputMessage[] {
-+    if (visible.length === 2) { this.clear(bindingId); return parsed; }
++  restore(
++    bindingId: string,
++    attempt: number,
++    visible: unknown[],
++    parsed: ModelInputMessage[],
++  ): ModelInputMessage[] {
++    if (visible.length === 2) {
++      this.clear(bindingId);
++      // 首轮只接受插件构造的 system/user 输入，不能把孤立工具结果伪装成新审查。
++      if (
++        parsed.length !== 2 ||
++        parsed[0]?.role !== "system" ||
++        parsed[1]?.role !== "user" ||
++        parsed.some((message) => message.toolCallId || message.toolCalls?.length)
++      ) {
++        throw fault("Review initial transcript must contain only system and user input");
++      }
++      return parsed;
++    }
 +    const state = this.#bindings.get(bindingId);
-+    if (!state || state.attempt !== attempt || visible.length <= state.visible.length ||
-+      JSON.stringify(visible.slice(0, state.visible.length)) !== JSON.stringify(state.visible)) {
++    if (
++      !state ||
++      state.attempt !== attempt ||
++      visible.length <= state.visible.length ||
++      JSON.stringify(visible.slice(0, state.visible.length)) !== JSON.stringify(state.visible)
++    ) {
 +      this.clear(bindingId);
 +      throw fault("Review transcript does not match its bound visible prefix");
 +    }
 +    const last = state.native.at(-1);
 +    const suffix = parsed.slice(state.visible.length);
-+    const pending = new Set(last?.toolCalls?.map(call => call.id) ?? []);
++    const calls = last?.toolCalls ?? [];
++    const pending = new Set(calls.map((call) => call.id));
++    // Set 会静默折叠重复 ID，造成缺失结果也能续接；原生调用关联必须完整且唯一。
++    if (
++      calls.length === 0 ||
++      pending.size !== calls.length ||
++      calls.some((call) => !call.id || !["read_file", "list_files"].includes(call.name))
++    ) {
++      this.clear(bindingId);
++      throw fault("Review continuation has invalid pending read calls");
++    }
 +    for (const message of suffix) {
 +      if (message.role !== "tool" || !message.toolCallId || !pending.delete(message.toolCallId)) {
 +        this.clear(bindingId);
 +        throw fault("Review continuation may only append the pending read tool results");
 +      }
-+      message.toolName = last?.toolCalls?.find(call => call.id === message.toolCallId)?.name;
++      message.toolName = last?.toolCalls?.find((call) => call.id === message.toolCallId)?.name;
 +    }
-+    if (pending.size) { this.clear(bindingId); throw fault("Review continuation is missing a read tool result"); }
++    if (pending.size) {
++      this.clear(bindingId);
++      throw fault("Review continuation is missing a read tool result");
++    }
 +    return [...structuredClone(state.native), ...suffix];
 +  }
 +
-+  save(bindingId: string, attempt: number, visible: unknown[], native: ModelInputMessage[],
-+    output: unknown, assistant: ModelInputMessage): void {
-+    this.#bindings.set(bindingId, { attempt, visible: structuredClone([...visible, output]),
-+      native: structuredClone([...native, assistant]) });
++  save(
++    bindingId: string,
++    attempt: number,
++    visible: unknown[],
++    native: ModelInputMessage[],
++    output: unknown,
++    assistant: ModelInputMessage,
++  ): void {
++    this.#bindings.set(bindingId, {
++      attempt,
++      visible: structuredClone([...visible, output]),
++      native: structuredClone([...native, assistant]),
++    });
 +  }
 +}
 +
 +/** Preserve block signatures and provider metadata without sending them to the plugin. */
-+export function mergeReasoningMetadata(block: ModelReasoningContentBlock, metadata?: Record<string, unknown>): void {
++export function mergeReasoningMetadata(
++  block: ModelReasoningContentBlock,
++  metadata?: Record<string, unknown>,
++): void {
 +  if (!metadata) return;
 +  const merged = { ...block.providerOptions };
 +  for (const [key, value] of Object.entries(metadata)) {
-+    merged[key] = typeof value === "object" && value !== null && !Array.isArray(value)
-+      ? { ...(merged[key] as Record<string, unknown> | undefined), ...value } : value;
++    merged[key] =
++      typeof value === "object" && value !== null && !Array.isArray(value)
++        ? { ...(merged[key] as Record<string, unknown> | undefined), ...value }
++        : value;
 +  }
 +  block.providerOptions = merged;
 +}
@@ -2696,10 +2910,10 @@ index 0000000..3c1fdfd
 +}
 diff --git a/docs/specs/codex-auto-approval.md b/docs/specs/codex-auto-approval.md
 new file mode 100755
-index 0000000..5f3ad13
+index 0000000..e8467e4
 --- /dev/null
 +++ b/docs/specs/codex-auto-approval.md
-@@ -0,0 +1,295 @@
+@@ -0,0 +1,462 @@
 +# Codex automatic approval plugin bridge
 +
 +The local desktop installation is 3.14.4. This patch is based on source commit
@@ -2995,6 +3209,173 @@ index 0000000..5f3ad13
 +ZIP, complete host patch, SHA256 checksums and sanitized acceptance report. Keep
 +artifacts/0.1.2 intact for rollback. Update installation/configuration guidance
 +and GLM status. No public publication, database migration or user-profile change.
++
++## Explicit provider interception diagnostics (2026-10-02)
++
++The current incident has a successful same-session GLM main request followed by
++an auto_review request rejected with status 405 and the explicit message
++`request has been blocked due to unusual activity.`. The recorded request is
++nonretryable and the effective reviewer inherits the main model. This is a
++technical failure before an approval decision, not a policy denial. These facts
++do not identify the provider's internal blocking rule or prove that any one
++request header caused it. Version 0.1.3 did not verify that GLM was unblocked.
++
++### Ownership and boundaries
++
++The existing host approval error boundary owns conversion of native model
++errors into the sanitized ApprovalReviewFailure contract. Recognize the explicit
++unusual-activity blocking message as `provider_request_blocked`, with
++`retryable: false`. A status code of 405 alone is insufficient: an ordinary
++Method Not Allowed error must retain its ordinary failure classification.
++Read only the native adapter's known diagnostic fields when they are nested in
++its error context; do not serialize arbitrary context, causes, response bodies,
++request headers, credentials, hidden reasoning, or stacks. Preserve bounded
++HTTP status and request id when present, with the existing sanitization rules.
++The plugin consumes the normalized error through the existing bridge; it does
++not classify provider errors, persist new failure state, or choose another model.
++
++```mermaid
++sequenceDiagram
++  participant M as Native model adapter
++  participant H as Existing host approval error boundary
++  participant P as Approval plugin
++  participant R as Permission runtime
++  participant U as Dialog and replay projection
++  M-->>H: Explicit nonretryable block, known diagnostic context
++  H-->>P: Sanitized provider_request_blocked, retryable=false
++  P-->>R: ask with technical failure (no policy assessment)
++  R->>R: Register one-shot human response receiver
++  R-->>U: Existing durable failure and permission-request events
++```
++
++No new mutable state, cooldown, retry owner, or persistence schema is introduced.
++The current lease, binding, cancellation, configuration invalidation, native
++SingleAttempt and overall three-attempt/90-second budget remain authoritative.
++Explicit interception terminates this review without another model call. It
++cannot authorize the action or increment the policy-denial breaker. Desktop
++continuous events and replay use the same existing failure contract.
++
++### User experience and acceptance
++
++The existing permission dialog explains in Chinese and English that the
++provider blocked the review request and the review could not complete. Offer
++the existing choices of manual handling or selecting an independently configured
++reviewer in Settings > Plugins > CodexAutoApproval > Advanced details > Review model.
++Keep the sanitized original diagnostic available. Do not promise that retry,
++changing a model, or changing a network will remove the provider restriction.
++Do not automatically change the user's model, credentials, querySource,
++sessionType, proxy, permissions, or account.
++
++Regression must cover the actual AiSdkModelAdapterError context shape; explicit
++blocking with 405; ordinary 405; existing authentication and transient failures;
++one native request for explicit blocking; no execution, no policy denial, manual
++fallback and first-response behavior; bounded/redacted diagnostic fields; and
++failure propagation into existing display/replay paths. Run available core,
++bridge/host, type, lint, architecture and UI checks and report runtime limitations.
++An isolated fixture demonstrates local behavior only. No successful GLM review
++may be claimed without a real successful provider request. Preserve existing
++release archives and user profiles; this repair does not itself release a build
++or change the installed application.
++
++## Stateless Responses review continuation (2026-10-02)
++
++An initial review transcript consists only of the plugin's system and user
++messages, with no tool calls or tool-result IDs. A two-message transcript that
++contains orphaned tool results must fail continuation validation rather than
++resetting the binding as if it were a new review. Pending native read calls must
++also have nonempty unique IDs before any result can be paired.
++
++### Request policy and ownership
++
++The observed custom deepseek-v4-flash Responses review completed its first
++request with a tool call, then failed its continuation with HTTP 400 and
++`No tool call found for tool output with call_id`. The native SDK defaults to
++store=true and may serialize a tool call carrying an itemId as an item_reference.
++Compatibility endpoints need not resolve that server-side history reference.
++This repair is separate from the GLM unusual-activity provider interception.
++
++The model adapter's request-option boundary owns a shared generate/stream
++policy. Apply it only when the resolved native provider is OpenAI Responses
++and the already-normalized statusContext.querySource is auto_review. Determine
++protocol from the resolved provider, not an untrusted request override. From
++the first review call, force openai.store=false and remove previousResponseId
++and conversation from this request's effective options. Merge base and request
++openai namespace fields without losing unrelated options; union and deduplicate
++include with reasoning.encrypted_content because custom reasoning model names
++may not be recognized by the SDK. Request options override base options, then
++the stateless review policy overrides store and removes server-history selectors.
++Pass the same final effective options to both message transformation and SDK
++invocation. Do not mutate configuration, caller-owned objects, or messages.
++
++Main-session Responses, Chat Completions, and Anthropic retain their current
++behavior. Reuse existing metadata and providerOptions contracts; introduce no
++public API, bridge version, persistent setting, environment variable, database
++change, provider fallback, or new retry owner.
++
++ApprovalContinuation remains the single owner of native history, keyed by the
++active binding and attempt. Preserve complete tool-call IDs, arguments, tool
++results and private reasoning/provider metadata. The SDK projects that history
++into complete function_call/function_call_output pairs and inline reasoning
++when store=false. Do not delete private reasoning or rewrite IDs to disguise a
++broken association. Invalid, missing, duplicate, or foreign results fail closed.
++
++```mermaid
++sequenceDiagram
++  participant R as Runtime and ApprovalContinuation
++  participant A as Native request-option adapter
++  participant M as Responses endpoint
++  participant P as Approval plugin
++  R->>A: Bound first request, auto_review
++  A->>M: store=false, encrypted reasoning requested
++  M-->>R: Tool calls and private native context
++  R->>R: Save full context under binding and attempt
++  R-->>P: Visible read-only tool calls
++  P->>R: Visible history and matching tool results
++  R->>R: Validate pairing and restore full native context
++  R->>A: Full bound continuation
++  A->>M: Full calls and results, no server-history selectors
++  M-->>R: Assessment or another read-only investigation
++```
++
++Existing cancellation, lease validity, model/configuration/authorization
++invalidation, one-shot decisions, technical-failure fallback and total retry/time
++budgets remain authoritative. Private continuation is never persisted as a new
++session fact or exposed in desktop live events, replay, plugin replies, or logs.
++
++### Regression and real acceptance
++
++Before changing production logic, reproduce the defect through a strict local
++HTTP Responses fixture using the native SDK, runtime continuation, bridge and
++real plugin child. First return a tool call with itemId and encrypted reasoning;
++reject an item_reference or orphaned/mismatched function_call_output on the
++continuation. Record the failing baseline and then require full calls/results,
++store=false, include, no previous_response_id/conversation, preserved private
++reasoning, and automatic allow-once/deny-without-execution behavior.
++
++Cover multiple rounds, parallel read calls in one round, cross-review isolation,
++wrong/missing/duplicate result IDs, option precedence and nonmutation. Keep
++main-session Responses and other protocols as explicit negative controls.
++Use synthetic values for wire assertions; real acceptance evidence contains
++only bounded sanitized diagnostics, counts and booleans, never raw bodies,
++headers, credentials or reasoning.
++
++Run two isolated read-only review examples against the existing configured
++deepseek-v4-flash Responses provider, locked to its native provider reference.
++Resolve credentials and network options through the host; do not change user
++configuration. Use temporary fixture files and a side-effect-free executor
++counter, not the user's deletion command. Each example must actually call a
++read tool, return its result to the same model, obtain an assessment, and avoid
++manual approval. Do not substitute another model/protocol, a local fixture, or
++a human click. Clean temporary private state after the run; report transport or
++provider failures as unverified live acceptance, never success.
++
++Rebuild changed native modules before dist-based tests, then run core,
++bridge/host/protocol regression plus required root and CLI typecheck/lint and
++architecture checks. Record environment and baseline failures separately.
++Deliver source, repeatable test commands and fresh acceptance receipts only;
++do not rebuild release ZIPs, replace desktop installations, modify profiles,
++upgrade dependencies, or publish. Root agent owns this spec and review;
++GPT-6.1-Sol owns implementation and test code.
 diff --git a/packages/shared/src/zcode-protocol/approval-review.ts b/packages/shared/src/zcode-protocol/approval-review.ts
 new file mode 100755
 index 0000000..6393403
@@ -3009,6 +3390,33 @@ index 0000000..6393403
 +  requestId: z.string().max(160).optional(), retryAfterMs: z.number().int().min(0).max(90000).optional(),
 +  retryable: z.boolean().optional(),
 +}).strict();
+diff --git a/packages/ui/src/components/ApprovalReviewFailureNotice.tsx b/packages/ui/src/components/ApprovalReviewFailureNotice.tsx
+new file mode 100755
+index 0000000..fb548e6
+--- /dev/null
++++ b/packages/ui/src/components/ApprovalReviewFailureNotice.tsx
+@@ -0,0 +1,21 @@
++import type { IntlInstance } from "../i18n/IntlProvider.js";
++
++export function ApprovalReviewFailureNotice({ failure, intl }: { failure: { code: string; message: string; httpStatus?: number; requestId?: string }; intl: IntlInstance }) {
++  return (
++    <div className="space-y-2" data-testid="auto-review-failure">
++      {failure.code === "provider_request_blocked" ? (
++        <p className="text-ui-base leading-5 text-foreground">
++          {intl.formatMessage({ id: "chat.permission.autoReviewProviderBlocked" })}
++        </p>
++      ) : null}
++      <p className="text-ui-base leading-5 text-foreground break-all">{failure.code}: {failure.message}</p>
++      {failure.httpStatus !== undefined || failure.requestId ? (
++        <p className="text-ui-caption leading-5 text-foreground-subtle break-all">
++          {failure.httpStatus !== undefined ? intl.formatMessage({ id: "chat.permission.autoReviewHttpStatus" }, { status: failure.httpStatus }) : null}
++          {failure.httpStatus !== undefined && failure.requestId ? " · " : null}
++          {failure.requestId ? intl.formatMessage({ id: "chat.permission.autoReviewRequestId" }, { requestId: failure.requestId }) : null}
++        </p>
++      ) : null}
++    </div>
++  );
++}
 diff --git a/packages/ui/src/hooks/useCodexAutoApprovalMode.ts b/packages/ui/src/hooks/useCodexAutoApprovalMode.ts
 new file mode 100755
 index 0000000..48ab636

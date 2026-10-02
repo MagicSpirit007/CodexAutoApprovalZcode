@@ -6,14 +6,23 @@ import filecmp
 import shutil
 import sys
 import zipfile
+import argparse
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "artifacts/0.1.3"
+parser = argparse.ArgumentParser()
+parser.add_argument("--out", type=Path, default=ROOT / "artifacts/0.1.3")
+parser.add_argument("--patch", type=Path, default=ROOT / "host-adapter/zcode-29628c9-auto-review.patch")
+parser.add_argument("--checks", type=Path)
+parser.add_argument("--acceptance", type=Path, default=ROOT / "docs/desktop-acceptance.md")
+parser.add_argument("--plugin-only", action="store_true")
+args = parser.parse_args()
+OUT = args.out.resolve()
 MARKET = OUT / "local-marketplace"
 PLUGIN = ROOT / "plugins/codex-auto-approval"
 DESKTOP = OUT / "CodexAutoApproval-Windows"
-PATCH = ROOT / "host-adapter/zcode-29628c9-auto-review.patch"
-CHECKS = OUT / "acceptance/checks-summary.json"
+PATCH = args.patch.resolve()
+CHECKS = args.checks.resolve() if args.checks else OUT / "acceptance/checks-summary.json"
+ACCEPTANCE = args.acceptance.resolve()
 
 def copy_if_changed(source, destination):
     # Windows may hold an unchanged bundled executable open; no rewrite is needed.
@@ -30,9 +39,9 @@ metadata = json.loads((PLUGIN / "build-info.json").read_text())
 if manifest["version"] != "0.1.3" or metadata.get("bridgeProtocol") != 2:
     raise SystemExit("Delivery requires plugin 0.1.3 and bridge protocol 2")
 
-plugin_only = "--plugin-only" in sys.argv
+plugin_only = args.plugin_only
 for required in [DESKTOP / "resources/glm/zcode.cjs", PATCH,
-                 ROOT / "docs/desktop-acceptance.md", CHECKS]:
+                 ACCEPTANCE, CHECKS]:
     if plugin_only and required == DESKTOP / "resources/glm/zcode.cjs":
         continue
     if not required.is_file():
@@ -52,11 +61,12 @@ shutil.copytree(ROOT / "docs", MARKET / "docs", dirs_exist_ok=True)
     "在桌面插件市场添加本目录；安装并启用 CodexAutoApproval，"
     "新建会话，选择权限菜单中的 CodexAutoApproval。选择原生权限会在当前工作区停用本插件。\n\n停用或卸载可恢复原生人工审批。"
     "审批模型可在原生插件设置中选择跟随会话或指定模型；服务商凭据由原生服务商设置管理。\n\n"
-    "验收范围与固定提交差异见 docs/desktop-acceptance.md 和 docs/migration.md。\n",
+    "验收范围见 ACCEPTANCE.md，固定提交迁移说明见 docs/migration.md。\n",
     encoding="utf-8")
-shutil.copy2(PATCH, OUT / PATCH.name)
-shutil.copy2(ROOT / "docs/desktop-acceptance.md", OUT / "ACCEPTANCE.md")
-shutil.copy2(ROOT / "docs/desktop-acceptance.md", MARKET / "ACCEPTANCE.md")
+if PATCH != OUT / PATCH.name:
+    shutil.copy2(PATCH, OUT / PATCH.name)
+shutil.copy2(ACCEPTANCE, OUT / "ACCEPTANCE.md")
+shutil.copy2(ACCEPTANCE, MARKET / "ACCEPTANCE.md")
 shutil.copy2(CHECKS, OUT / "CHECKS.json")
 shutil.copy2(CHECKS, MARKET / "CHECKS.json")
 

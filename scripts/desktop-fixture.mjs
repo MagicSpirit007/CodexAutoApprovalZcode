@@ -21,14 +21,15 @@ export function inspectDesktopFixture(fixture) {
     hooks: outcome.hooks };
 }
 
-export async function prepareDesktopFixture(root, profile, port) {
+export async function prepareDesktopFixture(root, profile, port, options = {}) {
   const workspace = path.join(profile, 'workspace');
   const storage = path.join(profile, 'agent-storage');
   const storageRoot = path.join(storage, 'cli/plugins');
   const marketplace = path.join(profile, 'marketplace');
   await mkdir(path.join(workspace, '.zcode'), { recursive: true });
   // Acceptance installs the ZIP's extracted payload, with no source-tree dependency.
-  const zipMarket = path.join(root, 'artifacts/0.1.3/acceptance/zip-marketplace');
+  const zipMarket = options.marketplace ?? path.join(root, 'artifacts/0.1.3/acceptance/zip-marketplace');
+  await mkdir(marketplace, { recursive: true });
   await cp(path.join(zipMarket, 'marketplace.json'), path.join(marketplace, 'marketplace.json'));
   await cp(path.join(zipMarket, 'plugins/codex-auto-approval'), path.join(marketplace, 'plugins/codex-auto-approval'), { recursive: true });
   await addMarketplace({ source: { source: 'directory', path: marketplace }, storageRoot });
@@ -42,7 +43,7 @@ export async function prepareDesktopFixture(root, profile, port) {
     providerOrder: ['acceptance-local'],
     providerConfigRules: { providerRules: [{ providerId: 'acceptance-local', providerName: 'Acceptance Local', enabled: true,
       config: { group: 'standard-personal', access: { type: 'api-key', apiKey: 'LOCAL_ONLY_TEST_VALUE' },
-        api: { type: 'openai-chat-completions', baseUrl: `http://127.0.0.1:${port}/v1` }, personalModelIds: ['acceptance-model', 'acceptance-review-model'] } }] },
+        api: { type: options.protocol ?? 'openai-chat-completions', baseUrl: `http://127.0.0.1:${port}/v1` }, personalModelIds: ['acceptance-model', 'acceptance-review-model'] } }] },
     modelConfigRules: { providerModelRules: ['acceptance-model', 'acceptance-review-model'].map(modelId => ({ providerId: 'acceptance-local', modelId, config: {
       enabled: true, properties: { contextWindow: 64000, supportsToolCall: true, supportsJsonSchemaOutput: false },
       optionSpecs: { maxOutputTokens: { max: 8192, map: '{"max_tokens": maxOutputTokens}' }, reasoningLevel: { values: ['high', 'max'], map: '{"reasoning_effort":reasoningLevel}' } },

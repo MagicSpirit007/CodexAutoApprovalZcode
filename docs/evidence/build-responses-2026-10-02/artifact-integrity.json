@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-02T10:34:36.950Z",
+  "verification": "artifact-integrity-and-current-build-fingerprints",
+  "bundleMatchesFreshBuild": true,
+  "metadataHashesMatch": true,
+  "archiveParses": true,
+  "desktopEntrypointsMatchFreshBuild": true,
+  "responsesMarkersPresent": true,
+  "builtinProviderMatches": true,
+  "agentSha256": "6e24be474b337b51267e4813dda304411f9696b4efef921e84cafc12923b282e",
+  "desktopAsarSha256": "acf9813dcd88bf5b022692ae3103bda4f0071293b70ef4044f32a34805f22ec1",
+  "limitation": "String fingerprints verify inclusion; behavioral continuation is covered by current source regression and live receipts, separately from desktop GUI smoke."
+}

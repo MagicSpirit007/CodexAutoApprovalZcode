@@ -1,0 +1,14 @@
+{
+  "stage": "finalize",
+  "liveAttempted": false,
+  "completed": false,
+  "providerLocked": true,
+  "modelLocked": true,
+  "reasoningLevel": "max",
+  "examples": [],
+  "cleaned": true,
+  "nativeResolveStep": "model-fingerprint",
+  "nativeConfigurationsAgree": true,
+  "preflightVerified": true,
+  "configurationUnchanged": true
+}

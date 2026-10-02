@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-02",
+  "runtime": "Existing Node 22.21.1",
+  "actualOldDistBaseline": {
+    "command": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/responses-continuation.test.js",
+    "exitCode": 1,
+    "protocol": "openai-responses",
+    "transport": "local HTTP JSON generate",
+    "secondRequestRejected": true,
+    "httpStatus": 400,
+    "normalizedCode": "invalid_model_request",
+    "limitation": "Generate fixture explicitly supplied itemId and encrypted-reasoning metadata matching native streaming cache shape; it does not independently prove old stream extraction. Production source edits had begun but dist had not been rebuilt, so this ran the old adapter output."
+  },
+  "repeatableStreamingControl": {
+    "command": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test --test-name-pattern='legacy store=true' test/responses-continuation.test.js",
+    "scope": "Native SDK SSE metadata, runtime ApprovalContinuation, bridge, real plugin child and ToolExecutor",
+    "testOnlyOverride": "SDK runtime receives store=true to recreate the previous server-history selection behavior; shared production files are not rolled back",
+    "manualInjectedMetadata": false,
+    "nativeRequests": 2,
+    "secondRequestHasItemReference": true,
+    "secondRequestMissingFunctionCall": true,
+    "secondRequestRejected": true,
+    "httpStatus": 400,
+    "manualFallbackCount": 1,
+    "executionCount": 0,
+    "assertionsPassed": true
+  },
+  "fixedStreamingFixture": {
+    "nativeRequests": 6,
+    "independentReviews": 2,
+    "investigationRoundsPerReview": 2,
+    "parallelReadCallsPerRound": 2,
+    "encryptedReasoningPreserved": true,
+    "serverHistoryReferences": false,
+    "fullFunctionCallOutputPairs": true,
+    "allowExecutionCount": 1,
+    "denyExecutionIncrement": 0,
+    "manualFallbackCount": 0,
+    "assertionsPassed": true
+  },
+  "privacy": "All wire values are synthetic local fixtures. No real provider request, credentials or raw real-model output are included."
+}

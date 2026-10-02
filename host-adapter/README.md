@@ -41,7 +41,7 @@ npm run check
 npm run test:desktop
 ```
 
-基础 CI 自动执行不需宿主依赖的 52 个核心用例与语法检查。`test:desktop` 另外执行 15 个 Hook / 管道用例和 24 个常规宿主权限链路用例，依赖上面准备好的固定源码和 tsx。设置 `ZCODE_TEST_REVIEW_DEADLINE=1` 会启用额外的实际 90 秒总时限用例。
+基础 CI 自动执行不需宿主依赖的核心用例、审查配置及协议辅助测试与语法检查。`test:desktop` 另外执行 15 个 Hook / 管道用例和 24 个常规宿主权限链路用例，依赖上面准备好的固定源码和 tsx。设置 `ZCODE_TEST_REVIEW_DEADLINE=1` 会启用额外的实际 90 秒总时限用例。
 
 Windows 若无法解析 WSL 的依赖符号链接，可在准备依赖的环境中运行 `node scripts/bundle-host-tests.mjs`，再由 Windows Node 执行 `node --test artifacts/acceptance/host-chain.bundle.mjs`。桌面界面自动化脚本在 `scripts/desktop-e2e.mjs`；它只用于开发验收，需要 Playwright 等宿主依赖和可启动的 Windows 构建，模型使用本机 HTTP 替身。
 
@@ -77,3 +77,9 @@ python scripts/build-release.py
 本次实测与已知限制见 [验收记录](../docs/desktop-acceptance.md)；SSH、WSL、远程工作区和其他桌面系统仍未验证。
 
 0.1.3 仅本地交付；保留 `artifacts/0.1.2/` 供回退，无数据库迁移或公开发布。最终检查与真实模型状态以验收报告为准。
+
+## Responses 续接修复与最终包复验
+
+当前补丁包含审查专用的 Responses 无状态请求选项以及私有续接配对校验。完成源码准备与模块构建后运行 `npm run test:responses`。测试覆盖原失败行为、多轮、多调用、加密推理、隔离与错误不执行。
+
+2026-10-02 本机自动审查选择改用独立 Chat Completions 供应商，最终 Windows 包的真实插件链路已通过。新脚本显式接收成品与 profile 路径，不再依赖旧交付目录；参数及验证范围见[最终成品验收](../docs/desktop-responses-acceptance-2026-10-02.md)。本次仅推送源码，未创建新公开 Release。

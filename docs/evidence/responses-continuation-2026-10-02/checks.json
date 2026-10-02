@@ -1,0 +1,124 @@
+{
+  "date": "2026-10-02",
+  "scope": "Source-only Responses automatic-review continuation repair; no release or installation changes",
+  "runtime": {
+    "node": "22.21.1",
+    "platform": "Linux process against the existing mounted Windows workspace",
+    "upstreamPinnedNode": "24.14.0",
+    "dependenciesInstalledOrUpgraded": false,
+    "checksInvocation": "Existing local compiler and linter JavaScript entrypoints; pnpm/turbo wrappers were not used for these equivalent checks"
+  },
+  "rootTypecheck": {
+    "cwd": "host-adapter/upstream",
+    "command": "node node_modules/typescript/bin/tsc -b packages/rpc packages/provider packages/provider-node packages/shared packages/services packages/client packages/server packages/zcode-server-cli packages/ui packages/web packages/desktop/tsconfig.host.json",
+    "exitCode": 0
+  },
+  "cliTypecheck": {
+    "cwd": "host-adapter/upstream/apps/zcode-cli/packages/<package>",
+    "command": "node ../../node_modules/typescript/bin/tsc --noEmit",
+    "passedPackages": [
+      "adapters",
+      "core",
+      "bootstrap",
+      "contracts",
+      "cli",
+      "browser-use-plugin",
+      "dynamic-workflow-runtime",
+      "shared-types",
+      "i18n",
+      "node-repl-host",
+      "swift-bridge",
+      "telemetry",
+      "tui",
+      "debug",
+      "dynamic-workflow"
+    ],
+    "exceptions": {
+      "debug": "Checked both tsconfig.json and tsconfig.server.json with --noEmit",
+      "dynamic-workflow": "Ran scripts/generate-libs.mjs first; generated declaration and installed compiler both 5.9.3, no version regeneration needed"
+    },
+    "exitCodes": "All 0; core --noEmit repeated successfully after the final initial-transcript guard"
+  },
+  "lint": [
+    {
+      "cwd": "host-adapter/upstream",
+      "command": "node node_modules/oxlint/bin/oxlint",
+      "exitCode": 0,
+      "files": 2621,
+      "warnings": 70,
+      "errors": 0
+    },
+    {
+      "cwd": "host-adapter/upstream/apps/zcode-cli",
+      "command": "node ../../node_modules/oxlint/bin/oxlint --no-ignore packages/*/src packages/debug/server packages/debug/scripts",
+      "exitCode": 0,
+      "files": 1368,
+      "warnings": 54,
+      "errors": 0
+    },
+    {
+      "cwd": "host-adapter/upstream/apps/zcode-cli",
+      "command": "node ../../node_modules/oxlint/bin/oxlint --no-ignore packages/adapters/src/model/approval-responses-options.ts packages/adapters/src/model/runner-options.ts packages/core/src/runtime/helpers/approval-continuation.ts",
+      "exitCode": 0,
+      "files": 3,
+      "warnings": 0,
+      "errors": 0
+    }
+  ],
+  "architecture": {
+    "command": "node scripts/architecture/architecture-check.mjs check --changed",
+    "cwd": "host-adapter/upstream",
+    "exitCode": 0,
+    "violations": 0,
+    "baseline": 0,
+    "new": 0,
+    "baselineChanged": false
+  },
+  "tests": [
+    {
+      "command": "node --test test/approval.test.js test/cli.test.js test/model.test.js test/runtime.test.js",
+      "passed": 52,
+      "failed": 0,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    {
+      "command": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/desktop.test.js test/host-chain.test.js test/approval-protocols.test.js",
+      "passed": 69,
+      "failed": 0,
+      "skipped": 1,
+      "exitCode": 0,
+      "skip": "Existing opt-in actual 90-second total-deadline fixture",
+      "note": "Ran after the final adapter/core rebuild; child processes used the same existing Linux Node runtime"
+    }
+  ],
+  "syntaxCheck": {
+    "command": "node scripts/check.js",
+    "exitCode": 0,
+    "result": "All JavaScript syntax checks passed"
+  },
+  "newContinuationTests": "See local-tests.json and baseline.json for the 16 new tests executed by GPT-6.1-Sol",
+  "liveAcceptance": {
+    "command": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs scripts/responses-live-review.mjs --execute-reviewed <existing-zcode-directory> docs/evidence/responses-continuation-2026-10-02/live.json",
+    "exitCode": 0,
+    "model": "deepseek-v4-flash",
+    "protocol": "openai-responses",
+    "reasoningLevel": "max",
+    "examplesCompleted": 2,
+    "requests": 4,
+    "toolCalls": 3,
+    "continuations": 2,
+    "configurationUnchanged": true,
+    "temporaryWorkspaceCleaned": true,
+    "receipt": "live.json",
+    "priorPreparationFailure": "Before any supplier request, the harness mixed provider dist and src class identities. Unifying its import fixed the local private-field TypeError. See preflight-01.json, preflight-diagnostic.json and preflight.json."
+  },
+  "environmentFailures": [
+    "Three initial local check launches in the default sandbox failed before execution: Failed to create unified exec process, No such file or directory. The same checks completed outside that launcher."
+  ],
+  "limitations": [
+    "Pinned Node 24.14.0 was not available for this run; existing Node 22.21.1 was used.",
+    "No Windows desktop UI, release package or installed application was exercised or replaced."
+  ],
+  "regressionResultsPending": false
+}

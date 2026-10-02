@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { cloneChatReviewConfig } from '../scripts/clone-chat-review-config.mjs';
+test('Chat review clone preserves main, credentials, endpoint, inherited model rules, max and other plugin options', () => {
+  const providers = { config: { providerOrder: ['main'], providerConfigRules: { providerRules: [{ providerId: 'main', config: { access: { type: 'api-key', apiKey: 'synthetic' }, api: { type: 'openai-responses', baseUrl: 'https://example.invalid' }, personalModelIds: ['target', 'other'] } }] }, modelConfigRules: { providerModelRules: [{ providerId: 'main', modelId: 'target', config: { properties: { contextWindow: 500000 } } }], manualProviderModelRules: [] }, defaultModelSelection: { providerId: 'main', modelId: 'other' } } };
+  const cli = { plugins: { options: { plugin: { otherOption: true, reviewModel: { mode: 'specified', providerId: 'main', modelId: 'target', options: { reasoningLevel: 'max' } } }, unrelated: { enabled: true } } } };
+  const before = JSON.stringify({ providers, cli });
+  const result = cloneChatReviewConfig(providers, cli, 'plugin', 'review-chat');
+  assert.equal(JSON.stringify({ providers, cli }), before);
+  assert.deepEqual(result.providers.config.defaultModelSelection, providers.config.defaultModelSelection);
+  assert.deepEqual(result.provider.config.access, providers.config.providerConfigRules.providerRules[0].config.access);
+  assert.equal(result.provider.config.api.baseUrl, 'https://example.invalid');
+  assert.equal(result.provider.config.api.type, 'openai-chat-completions');
+  assert.deepEqual(result.provider.config.personalModelIds, ['target']);
+  assert.deepEqual(result.providers.config.modelConfigRules.providerModelRules[1].config, providers.config.modelConfigRules.providerModelRules[0].config);
+  assert.equal(result.selection.options.reasoningLevel, 'max');
+  assert.equal(result.cli.plugins.options.plugin.otherOption, true);
+  assert.deepEqual(result.cli.plugins.options.unrelated, cli.plugins.options.unrelated);
+  delete providers.config.modelConfigRules.manualProviderModelRules;
+  const missingOptional = cloneChatReviewConfig(providers, cli, 'plugin', 'review-chat');
+  assert.deepEqual(missingOptional.providers.config.modelConfigRules.manualProviderModelRules, []);
+});

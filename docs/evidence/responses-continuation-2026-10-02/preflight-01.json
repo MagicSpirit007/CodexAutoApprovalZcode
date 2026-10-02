@@ -1,0 +1,15 @@
+{
+  "stage": "finalize",
+  "liveAttempted": false,
+  "completed": false,
+  "providerLocked": true,
+  "modelLocked": true,
+  "reasoningLevel": "max",
+  "examples": [],
+  "cleaned": true,
+  "failure": {
+    "stage": "native-resolve",
+    "code": "review_error"
+  },
+  "configurationUnchanged": true
+}

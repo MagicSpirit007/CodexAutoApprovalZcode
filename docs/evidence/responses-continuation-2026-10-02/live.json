@@ -1,0 +1,40 @@
+{
+  "stage": "finalize",
+  "liveAttempted": true,
+  "completed": true,
+  "providerLocked": true,
+  "modelLocked": true,
+  "reasoningLevel": "max",
+  "examples": [
+    {
+      "requests": 2,
+      "readCalls": 2,
+      "continuations": 1,
+      "stateless": true,
+      "noReferences": true,
+      "paired": true,
+      "argumentsIntact": true,
+      "encryptedReturned": true,
+      "encryptedRestored": true,
+      "decision": "allow",
+      "executorCount": 1
+    },
+    {
+      "requests": 2,
+      "readCalls": 1,
+      "continuations": 1,
+      "stateless": true,
+      "noReferences": true,
+      "paired": true,
+      "argumentsIntact": true,
+      "encryptedReturned": true,
+      "encryptedRestored": true,
+      "decision": "allow",
+      "executorCount": 1
+    }
+  ],
+  "cleaned": true,
+  "nativeResolveStep": "model-fingerprint",
+  "nativeConfigurationsAgree": true,
+  "configurationUnchanged": true
+}

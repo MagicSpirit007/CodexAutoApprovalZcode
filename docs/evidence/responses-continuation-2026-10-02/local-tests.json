@@ -1,0 +1,108 @@
+{
+  "date": "2026-10-02",
+  "runtime": "Existing Linux Node 22.21.1; no dependency or runtime installation",
+  "scope": "Local synthetic fixtures only; live acceptance is controlled and recorded separately by the root agent",
+  "testCommand": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/responses-options.test.js test/responses-continuation.test.js",
+  "repeatableEntrypoint": "npm run test:responses",
+  "result": {
+    "total": 16,
+    "passed": 16,
+    "failed": 0,
+    "skipped": 0,
+    "exitCode": 0
+  },
+  "testGroups": [
+    {
+      "file": "test/responses-options.test.js",
+      "count": 13,
+      "coverage": [
+        "namespace option preservation, include union and deduplication, frozen-input nonmutation",
+        "main Responses and other-protocol negative controls",
+        "malformed include rejection and protocol-spoof negative control",
+        "missing, wrong and duplicate tool results; state invalidation",
+        "empty, non-read and duplicate native tool calls",
+        "orphaned tool results disguised as initial input"
+      ]
+    },
+    {
+      "file": "test/responses-continuation.test.js",
+      "count": 3,
+      "coverage": [
+        "strict native generate second-round full calls and encrypted reasoning",
+        "legacy store=true SDK runtime control with actual SSE metadata and manual fallback",
+        "fixed full SDK, runtime continuation, bridge, plugin child and ToolExecutor chain with parallel reads, multiple rounds and review isolation"
+      ]
+    }
+  ],
+  "oldBehaviorControl": {
+    "meaning": "The test overrides only the SDK runtime stream options to store=true, recreating server-history reference projection. It uses the current source and native SDK; no old desktop binary is executed and shared production files are not rolled back.",
+    "manuallyInjectedStreamingMetadata": false,
+    "requests": 2,
+    "secondRequestHasItemReference": true,
+    "secondRequestMissingFullFunctionCall": true,
+    "secondRequestRejectedWithHttp400": true,
+    "manualRequests": 1,
+    "executions": 0
+  },
+  "fixedFullChain": {
+    "requests": 6,
+    "independentReviews": 2,
+    "investigationRoundsPerReview": 2,
+    "parallelReadCallsPerRound": 2,
+    "manualRequests": 0,
+    "allowExecutions": 1,
+    "denyExecutionIncrement": 0,
+    "encryptedReasoningRestored": true
+  },
+  "builds": [
+    {
+      "cwd": "host-adapter/upstream",
+      "command": "node node_modules/typescript/bin/tsc -p apps/zcode-cli/packages/adapters/tsconfig.json",
+      "exitCode": 0,
+      "purpose": "Final adapter dist regeneration before dist-based regressions"
+    },
+    {
+      "cwd": "host-adapter/upstream",
+      "command": "node node_modules/typescript/bin/tsc -p apps/zcode-cli/packages/core/tsconfig.json",
+      "exitCode": 0,
+      "purpose": "Final core dist regeneration including initial-transcript and pending-call guards"
+    }
+  ],
+  "finalScriptAndTestLint": {
+    "command": "node host-adapter/upstream/node_modules/oxlint/bin/oxlint --no-ignore scripts/responses-live-review.mjs test/responses-continuation.test.js test/responses-options.test.js",
+    "files": 3,
+    "warnings": 0,
+    "errors": 0,
+    "exitCode": 0
+  },
+  "liveScriptSyntax": {
+    "command": "node --check scripts/responses-live-review.mjs",
+    "exitCode": 0
+  },
+  "sourceDiffWhitespace": {
+    "exitCode": 0
+  },
+  "preflight": {
+    "command": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs scripts/responses-live-review.mjs --preflight-only <existing-profile> docs/evidence/responses-continuation-2026-10-02/preflight.json",
+    "rootCause": "The script imported provider/dist while native decoders used the provider package export at src/index.ts, creating separate ProviderConfigMap classes. Registry overlay could not access the other class instance's private values field. The script now imports the same source export.",
+    "exitCode": 0,
+    "preflightVerified": true,
+    "nativeConfigurationsAgree": true,
+    "providerLocked": true,
+    "modelLocked": true,
+    "reasoningLevel": "max",
+    "configurationUnchanged": true,
+    "liveAttempted": false,
+    "cleaned": true,
+    "finalScriptSyntax": {
+      "exitCode": 0
+    },
+    "finalScriptLint": {
+      "files": 1,
+      "warnings": 0,
+      "errors": 0,
+      "exitCode": 0
+    }
+  },
+  "releaseAndProfiles": "No release archives rebuilt, installed desktop replaced, user settings modified, commits pushed or publication performed by this implementation agent"
+}

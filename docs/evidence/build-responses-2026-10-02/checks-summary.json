@@ -1,0 +1,48 @@
+{
+  "buildVariant": "responses-fix-20261002",
+  "buildDate": "2026-10-02",
+  "pluginVersion": "0.1.3",
+  "bridgeProtocol": 2,
+  "completeAgentRebuilt": true,
+  "desktopProductionRebuilt": true,
+  "artifactIntegrity": "passed",
+  "windowsNodeAgentHelp": "passed",
+  "electronNodeAgentHelp": "passed",
+  "electronRuntime": {
+    "electron": "41.0.3",
+    "node": "24.14.0"
+  },
+  "isolatedDesktopHome": "passed",
+  "pageErrors": [],
+  "isolatedProfileCleaned": true,
+  "sourcePatchCleanApply": "passed",
+  "oldArtifactsPreserved": "passed",
+  "sourceTests": {
+    "passed": 137,
+    "failed": 0,
+    "existingLongTimeoutSkipped": 1,
+    "reference": "evidence/responses-continuation-2026-10-02/local-tests.json"
+  },
+  "sourceLiveResponses": {
+    "samples": 2,
+    "requests": 4,
+    "reference": "evidence/responses-continuation-2026-10-02/live.json"
+  },
+  "limitations": [
+    "Build driver used existing Linux Node22 compiler entrypoints, not pinned Node24/pnpm wrapper",
+    "GUI smoke used blank isolated profile and only verified launch/homepage; no configured model or real review run in final desktop",
+    "No additional network model calls during packaging; source live receipts are separate evidence"
+  ],
+  "receipts": [
+    "build-commands.json",
+    "artifact-integrity.json",
+    "windows-agent-start.json",
+    "patch-validation.json",
+    "policy-comparison.json",
+    "old-artifact-preservation.json",
+    "windows/desktop-smoke.json",
+    "windows/profile-cleanup.json"
+  ],
+  "referenceBase": "delivery-root (artifact, desktop or marketplace directory)",
+  "receiptBase": "evidence/build-responses-2026-10-02"
+}

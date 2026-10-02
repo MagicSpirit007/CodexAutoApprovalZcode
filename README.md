@@ -6,7 +6,7 @@
 
 **当前本地交付：0.1.3 · Windows x64 本地桌面会话 · 第三方适配项目。** 完整功能需要本项目配套的适配桌面；只在官方桌面安装插件，会因缺少审批桥而回到人工审批。这里移植的是审批核心，不是 Codex 全量复现，也不是 OpenAI 或 ZCode 官方发行。
 
-[本地 0.1.3 产物](artifacts/0.1.3/) · [功能对照](docs/migration.md) · [验收记录](docs/desktop-acceptance.md) · [源码构建](host-adapter/README.md)。0.1.3 仅本地交付；[0.1.2 回退产物](artifacts/0.1.2/)及其[验收记录](docs/desktop-acceptance-0.1.2.md)保留；[已发布的 0.1.1](https://github.com/MagicSpirit007/CodexAutoApprovalZcode/releases/tag/v0.1.1) 与其[历史验收](docs/desktop-acceptance-0.1.1.md)保留。
+[本次修复与成品验收](docs/desktop-responses-acceptance-2026-10-02.md) · [Responses 源码续接修复](docs/responses-continuation-2026-10-02.md) · [构建记录](docs/desktop-build-responses-2026-10-02.md) · [功能对照](docs/migration.md) · [源码构建](host-adapter/README.md)。0.1.3 产物目前仅本地交付，Git 仓库提供源码和补丁；此前验收见 [0.1.3](docs/desktop-acceptance.md)、[0.1.2](docs/desktop-acceptance-0.1.2.md)。[已发布的 0.1.1](https://github.com/MagicSpirit007/CodexAutoApprovalZcode/releases/tag/v0.1.1) 不包含本次修复。
 
 0.1.3 增加独立审查模型配置，复用宿主供应商、原生协议适配器及密钥管理。指定后只调用所选模型，技术失败转人工。进度和完成记录显示实际审查模型。真实 DeepSeek 放行、拒绝和文件调查续接已通过；GLM 两条路径因原生账号凭据未解析成功停在准备阶段，本轮未验证原拦截是否解除。详见[验收报告](docs/desktop-acceptance.md)。
 
@@ -16,13 +16,13 @@
 
 ### 1. 下载并启动适配桌面
 
-使用本地 [CodexAutoApproval-Windows-0.1.3.zip](artifacts/0.1.3/CodexAutoApproval-Windows-0.1.3.zip)，解压到独立目录，直接双击其中的 **ZCode.exe**。
+使用本地 `artifacts/0.1.3/CodexAutoApproval-Windows-0.1.3.zip`，解压后直接双击其中的 **ZCode.exe**。本机已部署的修复版入口为 `artifacts/0.1.3/CodexAutoApproval-Windows/ZCode.exe`；原开始菜单入口已指向这个目录。其他机器需按[源码构建说明](host-adapter/README.md)生成产物。
 
 适配桌面使用独立应用身份 `ZCode AutoReview`，可以与原版并存。已有旧适配版运行时，先退出旧版再启动新版；无需 `.cmd` 启动包装。按 ZCode 正常流程配置模型，并打开本地工作区。
 
 ### 2. 安装插件 ZIP
 
-使用本地 [CodexAutoApproval-plugin-0.1.3.zip](artifacts/0.1.3/CodexAutoApproval-plugin-0.1.3.zip)，解压到任意目录。
+已经安装并启用 0.1.3 插件的适配桌面可继续沿用，无需重装。首次安装时使用本地 `artifacts/0.1.3/CodexAutoApproval-plugin-0.1.3.zip`，解压到任意目录。
 
 在桌面 **设置 → 插件 → 创建 → 添加 marketplace** 中，选择**包含 marketplace.json 的解压目录**，然后安装并启用 **CodexAutoApproval**。不要直接选择 ZIP 文件，也不要选择其内部的插件子目录。
 
@@ -44,13 +44,17 @@
 
 ### 4. 配置审查模型
 
-在 **设置 → 插件 → CodexAutoApproval → 高级 → 审查模型** 中选择“跟随会话”，或从原生模型菜单指定供应商、模型与支持的推理档位，点击保存。旧配置默认跟随会话。用户作用域保存默认选择，工作区作用域可覆盖；“恢复继承值”会删除工作区覆盖。保存后下一次审查生效，在途配置变化会使旧结果失效。
+在 **设置 → 插件 → CodexAutoApproval → 高级信息 → 审查模型** 中选择“跟随会话”，或从原生模型菜单指定供应商、模型与支持的推理档位，点击保存。旧配置默认跟随会话。用户作用域保存默认选择，工作区作用域可覆盖；“恢复继承值”会删除工作区覆盖。保存后下一次审查生效，在途配置变化会使旧结果失效。
 
 通过模型菜单的 **管理模型** 进入原生供应商配置，填写自定义 Base URL、协议和 API Key。插件只保存模型引用与推理选项。审查模型切换不会改变主会话模型；模型删除、缺少凭据或能力不兼容会显示原因并转人工。
 
+**GLM 出现 `request has been blocked due to unusual activity.` 时：** 这表示供应商拦截了审查请求，审批尚未得到结论。2026-10-02 的现场日志确认，同一会话的普通 GLM 请求成功，自动审查请求收到状态码 405 并立即转人工；0.1.3 并未验证解除该拦截。旧配置仍默认跟随会话，独立审查模型需在上述设置中主动指定。可先人工处理当前动作，或配置独立审查模型；具体阻断规则仍需供应商确认。详见[本次排查与修复范围](docs/glm-review-block-2026-10-02.md)。
+
+**Responses 出现 `No tool call found for tool output with call_id` 时：** 这是工具结果续接失败，与上述 GLM 拦截分开处理。此前 0.1.3 的真实 DeepSeek 调查验收使用 Chat Completions，不能证明 Responses 续接可用。2026-10-02 的修复使自动审查发送完整工具历史，当前 `deepseek-v4-flash` Responses 已完成两个真实调查续接样例。宿主补丁与本地最终包已包含修复。本机日常入口已替换为最终包，自动审查按使用者选择改为独立 Chat Completions 供应商，仍使用 `deepseek-v4-flash` / `max`。包内 Agent、真实插件子进程与桌面审批链完成了调查、工具结果续接和一次获准执行；复杂验收留给使用者。详见[源码续接报告](docs/responses-continuation-2026-10-02.md)和[本次构建记录](docs/desktop-build-responses-2026-10-02.md)。
+
 ### 校验下载
 
-本地版本目录提供 [SHA256SUMS.txt](artifacts/0.1.3/SHA256SUMS.txt)，可用 PowerShell 校验文件：
+本地产物目录 `artifacts/0.1.3/` 提供 `SHA256SUMS.txt`，可用 PowerShell 校验文件：
 
 ```powershell
 Get-FileHash .\CodexAutoApproval-Windows-0.1.3.zip -Algorithm SHA256

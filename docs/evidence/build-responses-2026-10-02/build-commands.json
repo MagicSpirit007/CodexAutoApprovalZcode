@@ -1,0 +1,92 @@
+{
+  "buildDate": "2026-10-02",
+  "variant": "responses-fix-20261002",
+  "pluginVersion": "0.1.3",
+  "bridgeProtocol": 2,
+  "sourceBase": "29628c9acdb81b703bbd4080c207a0e7ce5e276e",
+  "buildRuntime": {
+    "linuxNode": "22.21.1",
+    "windowsNode": "22.19.0",
+    "upstreamPinnedNode": "24.14.0",
+    "pinnedRuntimeUsed": false,
+    "dependenciesInstalledOrUpgraded": false
+  },
+  "sourceResources": "<original-desktop-3.14.4>",
+  "commands": [
+    {
+      "entry": "node scripts/check-workspace-freshness.mjs",
+      "status": "passed"
+    },
+    {
+      "entry": "node scripts/architecture/architecture-check.mjs check --changed",
+      "status": "passed",
+      "violations": 0
+    },
+    {
+      "entry": "node node_modules/typescript/bin/tsc -p apps/zcode-cli/packages/adapters/tsconfig.json",
+      "status": "passed"
+    },
+    {
+      "entry": "node node_modules/typescript/bin/tsc -p apps/zcode-cli/packages/core/tsconfig.json",
+      "status": "passed"
+    },
+    {
+      "entry": "node apps/zcode-cli/packages/cli/scripts/build.mjs --desktop-agent",
+      "status": "passed"
+    },
+    {
+      "entry": "node packages/desktop/scripts/build-metadata.mjs",
+      "status": "passed"
+    },
+    {
+      "entry": "cleanDesktopProductionOutput imported from run-production-build.mjs",
+      "status": "passed"
+    },
+    {
+      "entry": "NODE_ENV=production ZCODE_ENV=production node node_modules/tsup/dist/cli-default.js",
+      "status": "passed"
+    },
+    {
+      "entry": "NODE_ENV=production ZCODE_ENV=production node node_modules/vite/bin/vite.js build",
+      "status": "passed"
+    },
+    {
+      "entry": "ZCODE_BOOTSTRAP_WITH_REMOTE=1 ZCODE_TARGET_OS=win32 node packages/desktop/scripts/prepare-agent-node-bundle.mjs",
+      "status": "passed"
+    }
+  ],
+  "environmentFailures": [
+    {
+      "operation": "ordinary sandbox build start",
+      "error": "Failed to create unified exec process: No such file or directory",
+      "resolution": "require_escalated workspace-only build"
+    },
+    {
+      "operation": "initial direct desktop tool path",
+      "error": "MODULE_NOT_FOUND packages/desktop/node_modules/tsup/dist/cli-default.js",
+      "resolution": "actual root node_modules entry used"
+    },
+    {
+      "operation": "initial tsup onSuccess",
+      "error": "/bin/sh: node: Permission denied",
+      "resolution": "temporary process PATH points to existing Linux node; production build rerun passed"
+    },
+    {
+      "operation": "initial independent artifact asar staging",
+      "error": "WSL-mounted drive >30000 small files bottleneck; process intentionally stopped before output staging",
+      "resolution": "same staging script optional parameter6 temporary Linux /tmp directory"
+    },
+    {
+      "operation": "initial GUI smoke cleanup",
+      "error": "Windows sqlite unlink EBUSY after browser close",
+      "resolution": "No new artifact processes remained on read-only Win32 process check; order changed to taskkill started process tree before CDP close, bounded rm retries added; rerun final result is separate receipt"
+    }
+  ],
+  "limits": [
+    "No new network model calls in build phase",
+    "No official installer/uninstaller execution",
+    "No installed application/profile replacement",
+    "GUI/native bundle verification recorded separately"
+  ],
+  "temporaryStaging": "/tmp/auto-review-responses-build-asar-20261002"
+}

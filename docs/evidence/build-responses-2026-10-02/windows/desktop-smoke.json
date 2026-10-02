@@ -1,0 +1,33 @@
+{
+  "pid": 42324,
+  "title": "ZCode",
+  "bodyText": "命令面板\n\n搜索并执行当前工作区可用的命令。\n\n新建任务\nCtrl+N\n搜索\nCtrl+K\n自动化\n插件市场\n分组\n项目\n项目\n尚未打开项目\n任务\n还没有任务\n连接使用\n移动端远程控制\n\n晚上好呀，今天辛苦啦\n\n当前没有可用模型。请开通编程套餐或配置自定义模型。\n升级\n配置\n选择项目\n\n\n\n\n向 ZCode 提问，使用 @ 添加上下文，使用 / 选择命令或能力\n添加上下文\n变更前确认\n管理模型\n发送\n周报总结\n报错修复\nPPT 制作\n闲时任务\n更新",
+  "pageErrors": [],
+  "adapterBuild": {
+    "distribution": "CodexAutoApproval-local-portable-host-adapter",
+    "pluginVersion": "0.1.3",
+    "buildVariant": "responses-fix-20261002",
+    "buildDate": "2026-10-02T10:29:32.596Z",
+    "electronAssetSource": "official-installed-Windows-3.14.4-resources",
+    "responsesReviewStatelessContinuation": true,
+    "electronAssetSourceVersion": "3.14.4",
+    "desktopSourceVersion": "3.14.3",
+    "agentSourceVersion": "3.14.3",
+    "upstreamCommit": "29628c9acdb81b703bbd4080c207a0e7ce5e276e",
+    "codexCommit": "d42056091aded7feb1d88ac7e83972108b2aa478",
+    "bridgeProtocol": 2,
+    "applicationIdentity": "ZCode AutoReview",
+    "permissionOption": "CodexAutoApproval",
+    "originalAgentSha256": "fad4c35c4c36ec210d8a06d3fa0e77de23c8545e2eb6ff90aea1eb38d1e6275f",
+    "adaptedAgentSha256": "6e24be474b337b51267e4813dda304411f9696b4efef921e84cafc12923b282e",
+    "originalDesktopAsarSha256": "172d6f333e61642ce3882250949fafe8180f75b5b8e5552244ca2c59ca05d14e",
+    "adaptedDesktopAsarSha256": "acf9813dcd88bf5b022692ae3103bda4f0071293b70ef4044f32a34805f22ec1",
+    "changes": [
+      "Automatic review Responses uses store=false, full tool call/result pairing and encrypted reasoning continuation",
+      "Bridge v2 with independently configured native review model and private tool continuation",
+      "PermissionRequest ask/interrupt",
+      "CodexAutoApproval permission radio option using native workspace plugin settings",
+      "Direct exe startup with independent application identity"
+    ]
+  }
+}

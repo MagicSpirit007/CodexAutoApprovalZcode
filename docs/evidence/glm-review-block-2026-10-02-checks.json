@@ -1,0 +1,149 @@
+{
+  "date": "2026-10-02",
+  "scope": "Local provider-interception normalization, manual fallback, replay and permission-dialog regression; no live provider request",
+  "runtime": {
+    "usedNode": "22.21.1 (existing Linux runtime)",
+    "alsoCheckedNode": "22.19.0 (existing Windows runtime)",
+    "upstreamRequiredNode": "24.14.0",
+    "packageManager": "pnpm 10.33.2 requested; existing global wrapper also emitted pnpm-v11 configuration warning",
+    "limitation": "Pinned Node 24 was unavailable; no dependencies or runtimes were installed"
+  },
+  "build": {
+    "command": "node node_modules/typescript/bin/tsc -p apps/zcode-cli/packages/adapters/tsconfig.json",
+    "cwd": "host-adapter/upstream",
+    "exitCode": 0,
+    "scope": "Rebuilt local adapters/dist from final modified sources before final host-chain and protocol regressions; existing core/bootstrap dist reused"
+  },
+  "tests": [
+    {
+      "name": "desktop bridge",
+      "command": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/desktop.test.js",
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0,
+      "exitCode": 0,
+      "execution": "Final desktop run shared a command with the UI test (26 total passed); temporary current-process PATH selected existing Linux Node for hook children"
+    },
+    {
+      "name": "native host chain and replay",
+      "command": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/host-chain.test.js",
+      "passed": 40,
+      "failed": 0,
+      "skipped": 1,
+      "exitCode": 0,
+      "skip": "Existing opt-in real 90-second total-deadline fixture"
+    },
+    {
+      "name": "mock native protocol requests and private-IO redaction",
+      "command": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/approval-protocols.test.js",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    {
+      "name": "Chinese and English UI server rendering",
+      "command": "npm run test:approval-ui",
+      "actualEquivalentCommand": "node ./host-adapter/upstream/node_modules/tsx/dist/cli.mjs --tsconfig ./host-adapter/upstream/packages/ui/tsconfig.json --test test/approval-failure-ui.test.js",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "exitCode": 0,
+      "coverage": "Block guidance, existing Advanced details settings path, present/absent diagnostics, ordinary failure and HTML escaping; no live desktop GUI exercised"
+    }
+  ],
+  "checks": [
+    {
+      "name": "workspace freshness",
+      "command": "node scripts/check-workspace-freshness.mjs",
+      "exitCode": 0,
+      "result": "ahead 0 / behind 0 relative to origin/main; HEAD has no tracking branch"
+    },
+    {
+      "name": "root typecheck",
+      "command": "pnpm typecheck",
+      "exitCode": 0,
+      "result": "Actual root tsc project-reference check completed; Node engine warning"
+    },
+    {
+      "name": "modified adapter typecheck",
+      "command": "node node_modules/typescript/bin/tsc -p apps/zcode-cli/packages/adapters/tsconfig.json --noEmit",
+      "exitCode": 0
+    },
+    {
+      "name": "UI typecheck",
+      "command": "node node_modules/typescript/bin/tsc -p packages/ui/tsconfig.json --noEmit",
+      "exitCode": 0
+    },
+    {
+      "name": "root lint equivalent",
+      "command": "node node_modules/oxlint/bin/oxlint",
+      "exitCode": 0,
+      "files": 2621,
+      "warnings": 70,
+      "errors": 0
+    },
+    {
+      "name": "full CLI source lint equivalent with explicit ignore override",
+      "command": "node ../../node_modules/oxlint/bin/oxlint --no-ignore packages/*/src",
+      "cwd": "host-adapter/upstream/apps/zcode-cli",
+      "exitCode": 0,
+      "files": 1360,
+      "warnings": 54,
+      "errors": 0
+    },
+    {
+      "name": "modified CLI files lint",
+      "command": "node ../../node_modules/oxlint/bin/oxlint --no-ignore packages/adapters/src/exec/approval-review-failure.ts packages/adapters/src/exec/approval-bridge.ts",
+      "exitCode": 0,
+      "files": 2,
+      "warnings": 0,
+      "errors": 0
+    },
+    {
+      "name": "modified UI files lint",
+      "exitCode": 0,
+      "files": 4,
+      "warnings": 0,
+      "errors": 0
+    },
+    {
+      "name": "final architecture",
+      "command": "node scripts/architecture/architecture-check.mjs check --changed",
+      "exitCode": 0,
+      "violations": 0,
+      "baseline": 0,
+      "new": 0
+    },
+    {
+      "name": "architecture context",
+      "command": "node scripts/architecture/architecture-check.mjs context zcode-cli",
+      "result": "Read context and available contract; module managed=false"
+    }
+  ],
+  "unavailableStandardEntrypoints": [
+    {
+      "command": "pnpm lint",
+      "exitCode": 1,
+      "reason": "Existing pnpm version-switch entrypoint ENOENT; direct existing oxlint used instead"
+    },
+    {
+      "command": "pnpm --dir apps/zcode-cli typecheck",
+      "exitCode": 1,
+      "reason": "Existing pnpm version-switch entrypoint ENOENT; modified adapter package noEmit and root/UI typechecks passed; full CLI turbo typecheck not confirmed"
+    },
+    {
+      "command": "pnpm --dir apps/zcode-cli lint",
+      "exitCode": 1,
+      "reason": "Existing turbo shim Permission denied; full CLI direct oxlint used instead"
+    }
+  ],
+  "resolvedIntermediateFailures": [
+    "Hook children initially selected an unusable node shim; temporary process PATH fixed it",
+    "SSR initially used default classic JSX; explicit existing UI tsconfig fixed it",
+    "A safe top-level legacy business-code fallback was lost in first helper revision and restored",
+    "New transient-retry and failed-outcome assertions were corrected to existing three-attempt and failed-event semantics"
+  ],
+  "unchangedExternalState": "No supplier calls, installation, user-profile changes, release archives, application restart, Git commit, push or publication",
+  "reviewCopies": "/tmp/autoapproval-20261002-before"
+}

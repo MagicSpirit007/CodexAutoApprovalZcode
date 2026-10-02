@@ -1,0 +1,7 @@
+{
+  "artifacts/0.1.3/CodexAutoApproval-Windows/AUTO-REVIEW-BUILD.json": "820f5dc3cca80c5cf411e7bdfbcce7af520346f9b6472108bb71ed837649ec1e",
+  "artifacts/0.1.3/CodexAutoApproval-Windows/resources/app.asar": "37bfaf4643d6fc8292afd8d6011155144fa1b7a1a61c848c0849f3e0d999b539",
+  "artifacts/0.1.3/CodexAutoApproval-Windows/resources/glm/zcode.cjs": "ba47955a192dd0f7692379bedb1bc48ef903692d5c5bf4ec52a576e63d98cf8b",
+  "artifacts/0.1.3/CodexAutoApproval-Windows-0.1.3.zip": "bd5d74f177ffc0757355436d64782b390fc250e1e73f35dcd506433ba00165d6",
+  "host-adapter/zcode-29628c9-auto-review.patch": "2384515fd52ecfb64fa09637d06a9f3aa684e4edce3c872900c3b80dc11d503a"
+}

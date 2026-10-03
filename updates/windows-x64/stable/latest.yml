@@ -1,0 +1,20 @@
+version: 0.2.0
+files:
+  - url: https://github.com/MagicSpirit007/CodexAutoApprovalZcode/releases/download/autoreview-v0.2.0/ZCodeAutoReview-0.2.0-win-x64.exe
+    sha512: u1nCh3lqlpVVMxrAm6K4Ch4IGgOKilo2dane+VYF/MncuInM1mNQVQjNlo/pFMC93HX1/3T3eGWVYyBIi4hU4g==
+    size: 167040634
+releaseDate: 2026-10-02T17:33:19.075Z
+autoReview:
+  schemaVersion: 1
+  applicationId: dev.codexautoreview.zcode
+  upstreamVersion: 3.14.3
+  upstreamCommit: 29628c9acdb81b703bbd4080c207a0e7ce5e276e
+  patchSha256: 92e9d6d3b2ea48ceaec7ce57d0446e91bef5310783c652b4a138d998ec842b6a
+  patchSummary:
+    - Approval bridge v2
+    - Native review model settings and Responses continuation
+    - Independent NSIS identity and confirmed stable updates
+  bridgeProtocol: 2
+  supportedPluginVersions:
+    - 0.1.3
+  dataSchemaChanged: false

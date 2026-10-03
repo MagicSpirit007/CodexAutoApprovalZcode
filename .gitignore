@@ -3,6 +3,7 @@ zcode.config.json
 node_modules/
 *.tmp
 artifacts/
+runtime/
 host-adapter/upstream/
 host-adapter/.build-tools/
 .publish/

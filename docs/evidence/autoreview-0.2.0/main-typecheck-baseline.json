@@ -1,0 +1,10 @@
+{
+  "upstreamCommit": "29628c9acdb81b703bbd4080c207a0e7ce5e276e",
+  "baselineDiagnostics": 87,
+  "adaptedDiagnostics": 87,
+  "newDiagnostics": [],
+  "resolvedDiagnostics": [],
+  "comparison": "structured per-package diagnostics; file, rule/code, multiplicity; ignore moved source lines",
+  "baselineLogs": "acceptance/checks/main-typecheck-clean-baseline.log",
+  "adaptedLogs": "acceptance/checks/main-typecheck.log"
+}

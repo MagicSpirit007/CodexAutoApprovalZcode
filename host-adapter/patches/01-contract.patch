@@ -1,0 +1,390 @@
+diff --git a/packages/shared/src/channels.ts b/packages/shared/src/channels.ts
+index 84992b2..f96778e 100644
+--- a/packages/shared/src/channels.ts
++++ b/packages/shared/src/channels.ts
+@@ -508,6 +508,8 @@ export const ZCODE_RPC_HOST_CAPABILITY_HEADER = "x-zcode-rpc-host-capability";
+ 
+ /** main → host process 的初始化消息类型 */
+ export const HostMessageTypes = {
++  UpdateInstallPrepare: "update-install-prepare",
++  UpdateInstallRelease: "update-install-release",
+   DatabaseStartupControl: "database-startup-control",
+   /** 初始化本地服务 */
+   InitLocal: "init-local",
+@@ -568,6 +570,7 @@ export const HostMessageTypes = {
+ 
+ /** host process → main process 的反馈消息类型 */
+ export const HostResponseTypes = {
++  UpdateInstallPrepared: "update-install-prepared",
+   DatabaseStartupState: "database-startup-state",
+   /** window Host → main：按 requestId 上报远程连接过程日志 */
+   RemoteWorkspaceConnectionLog: "remote-workspace-connection-log",
+diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
+index 678e1ca..0d53bd4 100644
+--- a/packages/shared/src/index.ts
++++ b/packages/shared/src/index.ts
+@@ -29,6 +29,9 @@ export type {
+ export type { WorkspacePurpose } from "./workspacePurpose.js";
+ export { DEFAULT_LOCALE } from "./protocol.js";
+ export { ZCODE_VERSION, ZCODE_COMMIT, ZCODE_BUILD_TIME } from "./version.js";
++export { validateAutoReviewUpdate } from "./auto-review-distribution.js";
++export { UpdateInstallLease } from "./update-install-lease.js";
++export type { AutoReviewRelease, AutoReviewUpdateMetadata, AutoReviewUpdateManifest } from "./auto-review-distribution.js";
+ export type { HelloMessage, HelloAckMessage } from "./handshake.js";
+ export type { ArmsRumEnv, ZCodeEnv, ZCodeProductFlavor } from "./env.js";
+ export type { RemoteAssetInstallMode } from "./remoteAssetInstallMode.js";
+diff --git a/packages/shared/src/validation.ts b/packages/shared/src/validation.ts
+index 7d89774..84b416c 100644
+--- a/packages/shared/src/validation.ts
++++ b/packages/shared/src/validation.ts
+@@ -468,6 +468,9 @@ export type HostResourceUsageSnapshotRequestMessage = z.infer<
+ >;
+ 
+ export const hostIncomingMessageSchema = z.discriminatedUnion("type", [
++  z.object({ type: z.literal("update-install-prepare"), requestId: nonEmptyStringSchema,
++    compatiblePluginVersions: z.array(nonEmptyStringSchema).min(1) }).strict(),
++  z.object({ type: z.literal("update-install-release"), requestId: nonEmptyStringSchema }).strict(),
+   z
+     .object({ type: z.literal("database-startup-control"), control: databaseStartupControlSchema })
+     .strict(),
+@@ -983,6 +986,8 @@ export type HostResourceUsageSnapshotResultResponse = z.infer<
+ >;
+ 
+ export const hostResponseMessageSchema = z.discriminatedUnion("type", [
++  z.object({ type: z.literal("update-install-prepared"), requestId: nonEmptyStringSchema,
++    idle: z.boolean(), error: z.string().optional() }).strict(),
+   z
+     .object({ type: z.literal("database-startup-state"), state: databaseStartupStateSchema })
+     .strict(),
+diff --git a/packages/shared/src/zcode-protocol-v4/rows.ts b/packages/shared/src/zcode-protocol-v4/rows.ts
+index d1753ef..9cf1d6b 100644
+--- a/packages/shared/src/zcode-protocol-v4/rows.ts
++++ b/packages/shared/src/zcode-protocol-v4/rows.ts
+@@ -1,3 +1,5 @@
++import { modelSelectionSchema } from "../model-selection.js";
++import { zcodeApprovalReviewFailureSchema } from "../zcode-protocol/approval-review.js";
+ // ConversationRow：行类型自包含。
+ // 三条结构性规则：row 自包含（渲染任一行不需看别的行）；
+ // 结构变化换整行（row.upserted），文本增长用 append（row.delta）；turn 是 row 上的标签不是容器。
+@@ -189,6 +191,11 @@ export const cuaAppIdentitySchema = z
+ export type CuaAppIdentity = z.infer<typeof cuaAppIdentitySchema>;
+ 
+ export const toolCallRowSchema = z.object({
++  permissionReview: z.object({
++    actualReviewModel: modelSelectionSchema.optional(),
++    requestId: z.string(), status: z.enum(["reviewing", "allow", "deny", "failed", "cancelled"]),
++    reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
++  }).optional(),
+   ...rowBaseFields,
+   kind: z.literal("toolCall"),
+   // 同一模型 response 的正文与工具共享此 ID；optional 兼容旧 snapshot。
+diff --git a/packages/shared/src/zcode-protocol-v4/snapshot.ts b/packages/shared/src/zcode-protocol-v4/snapshot.ts
+index 099b66c..a821d49 100644
+--- a/packages/shared/src/zcode-protocol-v4/snapshot.ts
++++ b/packages/shared/src/zcode-protocol-v4/snapshot.ts
+@@ -1,3 +1,4 @@
++import { zcodeApprovalReviewFailureSchema } from "../zcode-protocol/approval-review.js";
+ /* oxlint-disable max-lines -- v4 snapshot schema is a frozen cross-process contract; additions stay grouped here. */
+ // ConversationSnapshot A 区。
+ // A 区更新语义 = 字段级整体替换（state.updated），绝不深合并——深合并是错乱之母。
+@@ -235,6 +236,7 @@ const permissionOptionSchema = z.object({
+ });
+ 
+ export const permissionRequestPayloadSchema = z.object({
++  reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
+   kind: z.literal("permission"),
+   toolCallId: z.string(),
+   toolName: z.string(),
+diff --git a/packages/shared/src/zcode-protocol/index.ts b/packages/shared/src/zcode-protocol/index.ts
+index 5b3de01..b807767 100644
+--- a/packages/shared/src/zcode-protocol/index.ts
++++ b/packages/shared/src/zcode-protocol/index.ts
+@@ -1,3 +1,5 @@
++import { zcodeApprovalReviewFailureSchema } from "./approval-review.js";
++export { zcodeApprovalReviewFailureSchema } from "./approval-review.js";
+ import {
+   databaseStartupErrorCodeSchema,
+   databaseStartupErrorDetailsSchema,
+@@ -922,8 +924,16 @@ export const zcodeSessionSettingsStateSchema = z
+   })
+   .strict();
+ export type ZCodeSessionSettingsState = z.infer<typeof zcodeSessionSettingsStateSchema>;
++
++export const zcodePermissionReviewEventPayloadSchema = z.object({
++  actualReviewModel: modelSelectionSchema.optional(),
++  requestId: nonEmptyString, toolCallId: nonEmptyString, toolName: nonEmptyString,
++  outcome: z.enum(["allow", "deny", "failed", "cancelled"]).optional(),
++  reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
++}).strict();
+ export const zcodePendingPermissionSchema = z
+   .object({
++    reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
+     requestId: nonEmptyString,
+     toolCallId: nonEmptyString,
+     toolName: nonEmptyString,
+@@ -1117,6 +1127,8 @@ export const zcodeSessionEventTypeSchema = z.enum([
+   "part.removed",
+   "model.streaming",
+   "tool.updated",
++  "permission.reviewStarted",
++  "permission.reviewCompleted",
+   "permission.requested",
+   "permission.resolved",
+   "userInput.requested",
+@@ -1385,6 +1397,7 @@ export const zcodeToolUpdatedEventPayloadSchema = z.discriminatedUnion("kind", [
+ ]);
+ export const zcodePermissionRequestedEventPayloadSchema = z
+   .object({
++    reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
+     requestId: nonEmptyString.optional(),
+     toolCallId: nonEmptyString,
+     toolName: nonEmptyString,
+@@ -1461,6 +1474,8 @@ export const zcodeSessionEventSchema = z.discriminatedUnion("type", [
+   zcodeSessionEventEnvelopeFor("part.removed", zcodeMessagePartRemovedEventPayloadSchema),
+   zcodeSessionEventEnvelopeFor("model.streaming", zcodeModelStreamingEventPayloadSchema),
+   zcodeSessionEventEnvelopeFor("tool.updated", zcodeToolUpdatedEventPayloadSchema),
++  zcodeSessionEventEnvelopeFor("permission.reviewStarted", zcodePermissionReviewEventPayloadSchema),
++  zcodeSessionEventEnvelopeFor("permission.reviewCompleted", zcodePermissionReviewEventPayloadSchema),
+   zcodeSessionEventEnvelopeFor("permission.requested", zcodePermissionRequestedEventPayloadSchema),
+   zcodeSessionEventEnvelopeFor("permission.resolved", zcodePermissionResolvedEventPayloadSchema),
+   zcodeSessionEventEnvelopeFor("userInput.requested", zcodeUserInputRequestedEventPayloadSchema),
+@@ -2278,6 +2293,7 @@ export type ZCodeWorkspaceUpdateDynamicWorkflowPolicyResult = z.infer<
+ 
+ export const zcodePermissionRequestParamsSchema = z
+   .object({
++    reviewFailure: zcodeApprovalReviewFailureSchema.optional(),
+     requestId: nonEmptyString,
+     sessionId: nonEmptyString,
+     turnId: nonEmptyString.optional(),
+@@ -2480,7 +2496,14 @@ export type ZCodeOfficialMcpAuthHeadersResponse = z.infer<
+ 
+ // ── Plugin management (list + enable/disable) ──
+ // 镜像 @zcode/contracts 的 PluginMetadata, 仅保留 UI 需要的可序列化字段。
+-export const zcodePluginOptionValueSchema = z.union([z.string(), z.number(), z.boolean()]);
++export const zcodeReviewModelSelectionSchema = z.discriminatedUnion("mode", [
++  z.object({ mode: z.literal("inherit") }).strict(),
++  z.object({ mode: z.literal("specified"), providerId: z.string().trim().min(1).max(200),
++    modelId: z.string().trim().min(1).max(200),
++    options: z.object({ reasoningLevel: z.string().trim().min(1).max(80) }).strict().optional() }).strict(),
++]);
++export type ZCodeReviewModelSelection = z.infer<typeof zcodeReviewModelSelectionSchema>;
++export const zcodePluginOptionValueSchema = z.union([z.string(), z.number(), z.boolean(), zcodeReviewModelSelectionSchema]);
+ export type ZCodePluginOptionValue = z.infer<typeof zcodePluginOptionValueSchema>;
+ export const zcodePluginScopeSchema = z.enum(["user", "workspace"]);
+ export type ZCodePluginScope = z.infer<typeof zcodePluginScopeSchema>;
+@@ -3560,7 +3583,13 @@ export const zcodeOffPeakListResultSchema = z
+   .strict();
+ export type ZCodeOffPeakListProtocolResult = z.infer<typeof zcodeOffPeakListResultSchema>;
+ 
++export const zcodeUpdateInstallParamsSchema = z.object({ requestId: z.string().min(1),
++  compatiblePluginVersions: z.array(z.string().min(1)).min(1).optional() }).strict();
++export const zcodeUpdateInstallResultSchema = z.object({ idle: z.literal(true) }).strict();
++
+ export const zcodeProtocolMethods = {
++  updateInstallPrepare: "runtime/updateInstall/prepare",
++  updateInstallRelease: "runtime/updateInstall/release",
+   runtimeCapabilities: "runtime/capabilities",
+   computerUseOperationEvent: "computer-use/operation-event",
+   sessionCreate: "session/create",
+diff --git a/packages/shared/src/zcode-task-types-core.ts b/packages/shared/src/zcode-task-types-core.ts
+index 268ff83..29c88d9 100644
+--- a/packages/shared/src/zcode-task-types-core.ts
++++ b/packages/shared/src/zcode-task-types-core.ts
+@@ -611,6 +611,7 @@ export interface ZCodePlanStep {
+   status: "pending" | "in_progress" | "completed";
+ }
+ export interface ZCodePermissionRequest {
++  reviewFailure?: { code: string; message: string };
+   type: "permission_request";
+   taskId: string;
+   traceId: TraceId;
+diff --git a/packages/shared/src/auto-review-distribution.ts b/packages/shared/src/auto-review-distribution.ts
+new file mode 100755
+index 0000000..f14c2bb
+--- /dev/null
++++ b/packages/shared/src/auto-review-distribution.ts
+@@ -0,0 +1,126 @@
++/** 独立发行的来源与兼容合同；发行版本不能替代原生协议使用的上游版本。 */
++export interface AutoReviewRelease {
++  schemaVersion: 1;
++  distributionVersion: string;
++  applicationId: string;
++  productName: string;
++  executableName: string;
++  upstreamVersion: string;
++  upstreamCommit: string;
++  codexCommit: string;
++  bridgeProtocol: number;
++  pluginVersion: string;
++  supportedPluginVersions: string[];
++  repository: string;
++  updateFeedUrl: string;
++  defaultInstallDirectory: string;
++  dataSchemaChanged: false;
++}
++
++export interface AutoReviewUpdateMetadata {
++  schemaVersion: 1;
++  applicationId: string;
++  upstreamVersion: string;
++  upstreamCommit: string;
++  patchSha256: string;
++  patchSummary: string[];
++  bridgeProtocol: number;
++  supportedPluginVersions: string[];
++  dataSchemaChanged: false;
++}
++
++export interface AutoReviewUpdateManifest {
++  version: string;
++  files: Array<{ url: string; sha512: string; size: number }>;
++  autoReview: AutoReviewUpdateMetadata;
++}
++
++const stableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
++const object = (value: unknown): value is Record<string, unknown> =>
++  value !== null && typeof value === "object" && !Array.isArray(value);
++
++/** 此校验发生在更新 provider 返回版本之前，坏清单不会进入可下载状态。 */
++export function validateAutoReviewUpdate(
++  raw: unknown,
++  release: AutoReviewRelease,
++  installedPluginVersions: readonly string[] = [],
++  testAssetOrigin?: string,
++): asserts raw is AutoReviewUpdateManifest {
++  function fail(reason: string): never {
++    throw new Error(`AutoReview update rejected: ${reason}`);
++  }
++  if (!object(raw) || typeof raw.version !== "string" || !stableVersion.test(raw.version)) {
++    fail("stable distribution version required");
++  }
++  const info = raw.autoReview;
++  if (!object(info) || info.schemaVersion !== 1 || info.applicationId !== release.applicationId) {
++    fail("application identity or metadata missing");
++  }
++  if (typeof info.upstreamVersion !== "string" || !stableVersion.test(info.upstreamVersion)) {
++    fail("stable upstream version required");
++  }
++  if (typeof info.upstreamCommit !== "string" || !/^[a-f0-9]{40}$/.test(info.upstreamCommit)) {
++    fail("full upstream commit required");
++  }
++  if (typeof info.patchSha256 !== "string" || !/^[a-f0-9]{64}$/.test(info.patchSha256)) {
++    fail("patch checksum required");
++  }
++  if (
++    !Array.isArray(info.patchSummary) ||
++    info.patchSummary.length === 0 ||
++    !info.patchSummary.every((value) => typeof value === "string" && value.trim().length > 0)
++  ) {
++    fail("patch summary required");
++  }
++  if (info.bridgeProtocol !== release.bridgeProtocol || info.dataSchemaChanged !== false) {
++    fail("bridge or data schema incompatible");
++  }
++  if (
++    !Array.isArray(info.supportedPluginVersions) ||
++    !info.supportedPluginVersions.length ||
++    !info.supportedPluginVersions.every(
++      (value) => typeof value === "string" && stableVersion.test(value),
++    )
++  ) {
++    fail("tested plugin versions required");
++  }
++  const supportedPluginVersions = info.supportedPluginVersions;
++  if (installedPluginVersions.some((version) => !supportedPluginVersions.includes(version))) {
++    fail("installed CodexAutoApproval plugin incompatible");
++  }
++  if (!Array.isArray(raw.files) || raw.files.length !== 1)
++    fail("one full Windows installer required");
++  const file = raw.files[0];
++  if (
++    !object(file) ||
++    typeof file.url !== "string" ||
++    typeof file.sha512 !== "string" ||
++    !/^[A-Za-z0-9+/]{86}==$/.test(file.sha512) ||
++    !Number.isSafeInteger(file.size) ||
++    Number(file.size) <= 0
++  ) {
++    fail("installer URL, SHA512 and size required");
++  }
++  let url: URL;
++  try {
++    url = new URL(file.url);
++  } catch {
++    fail("invalid installer URL");
++  }
++  const expected = `/\u0072eleases/download/autoreview-v${raw.version}/${release.executableName}-${raw.version}-win-x64.exe`;
++  const officialPath = `/${release.repository}${expected}`;
++  if (
++    url.username ||
++    url.password ||
++    url.search ||
++    url.hash ||
++    (!(
++      url.protocol === "https:" &&
++      url.hostname === "github.com" &&
++      url.pathname === officialPath
++    ) &&
++      !(testAssetOrigin && url.origin === testAssetOrigin && url.pathname === expected))
++  ) {
++    fail("installer outside the pinned release repository");
++  }
++}
+diff --git a/packages/shared/src/update-install-lease.ts b/packages/shared/src/update-install-lease.ts
+new file mode 100755
+index 0000000..558c713
+--- /dev/null
++++ b/packages/shared/src/update-install-lease.ts
+@@ -0,0 +1,38 @@
++/** 安装租约先关闭准入，再读取运行时事实，避免空闲检查与新任务交错。 */
++export class UpdateInstallLease {
++  private owner: string | undefined;
++  private inFlight = 0;
++  enter(): () => void {
++    if (this.owner)
++      throw new Error("Update installation is preparing; retry after preparation finishes");
++    this.inFlight++;
++    let released = false;
++    return () => {
++      if (!released) {
++        released = true;
++        this.inFlight--;
++      }
++    };
++  }
++  acquire(id: string, isBusy: () => boolean): void {
++    if (!id) throw new Error("Update lease id is required");
++    if (this.owner === id) return;
++    if (this.owner) throw new Error("Another update installation is preparing");
++    this.owner = id;
++    try {
++      if (this.inFlight > 0 || isBusy())
++        throw new Error(
++          "Tasks, reviews or workflows are still running; finish them before updating",
++        );
++    } catch (error) {
++      this.owner = undefined;
++      throw error;
++    }
++  }
++  release(id: string): void {
++    if (this.owner === id) this.owner = undefined;
++  }
++  get preparing(): boolean {
++    return this.owner !== undefined;
++  }
++}
+diff --git a/packages/shared/src/zcode-protocol/approval-review.ts b/packages/shared/src/zcode-protocol/approval-review.ts
+new file mode 100755
+index 0000000..6393403
+--- /dev/null
++++ b/packages/shared/src/zcode-protocol/approval-review.ts
+@@ -0,0 +1,8 @@
++import { z } from "zod";
++
++export const zcodeApprovalReviewFailureSchema = z.object({
++  code: z.string().max(80), message: z.string().max(2000),
++  businessCode: z.string().max(80).optional(), httpStatus: z.number().int().min(100).max(599).optional(),
++  requestId: z.string().max(160).optional(), retryAfterMs: z.number().int().min(0).max(90000).optional(),
++  retryable: z.boolean().optional(),
++}).strict();

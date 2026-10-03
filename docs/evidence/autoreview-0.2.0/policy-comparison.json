@@ -1,0 +1,8 @@
+{
+  "codexCommit": "d42056091aded7feb1d88ac7e83972108b2aa478",
+  "source": "codex-rs/prompts/templates/guardian/policy.md",
+  "copy": "prompts/policy.md",
+  "normalization": "CRLF to LF; remove the added one-line source comment",
+  "bodyIdentical": true,
+  "bodySha256": "e6b0cf0a2e1c4cabc0a37ac2a0bc424ddd7c89e85d049e32d281a8db6e8d3ce6"
+}

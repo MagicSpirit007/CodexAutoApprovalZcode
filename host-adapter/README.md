@@ -1,85 +1,67 @@
-# 宿主适配构建
+# 宿主适配构建与稳定发行
 
-固定来源：[zai-org/ZCode](https://github.com/zai-org/ZCode)，提交 `29628c9acdb81b703bbd4080c207a0e7ce5e276e`，源码版本 3.14.3。发行包使用 ZCode 3.14.4 的 Electron 与 Windows 原生资源，再装入固定源码重建的 Agent 和桌面 JavaScript。它是独立适配发行，不能称为官方 3.14.4 的完整源码重建。
+发行配置唯一入口为仓库根目录 `release.config.json`。首个安装版为 **ZCode AutoReview 0.2.0**，桌面和 Agent 的源码均锁定公开 ZCode **3.14.3** 完整提交；插件仍为 **0.1.3**，审批桥为 **v2**。适配版本用于安装器、Windows PE、`app.getVersion()` 和更新索引，上游版本用于原生协议和来源记录。
 
-## 准备固定源码
+Electron 与匹配版本的 Windows 原生模块来自构建记录的运行资源目录；JavaScript、运行依赖闭包、桌面与 Agent 均从锁定源码构建。不能将本发行称为官方 3.14.4 的完整源码重建。公开基线的 Computer Use 模块是 unavailable 占位包，本发行不宣称包含该能力。
 
-从本仓库根目录执行以下命令；使用 Node 24.14.0、pnpm 10.33.2。补丁包含完整宿主改动及接口规格，不需要复制本项目的私人配置或构建缓存。
+## 准备源码和补丁
+
+先阅读上游架构受控上下文和 `docs/specs/autoreview-distribution.md`，再修改发行规格与配置。维护者手动选择稳定 tag；没有匹配的公开源码时停止。
 
 ```sh
 git clone https://github.com/zai-org/ZCode.git host-adapter/upstream
-git -C host-adapter/upstream checkout --detach 29628c9acdb81b703bbd4080c207a0e7ce5e276e
-cd host-adapter/upstream
-git apply --check ../zcode-29628c9-auto-review.patch
-git apply ../zcode-29628c9-auto-review.patch
-pnpm install --frozen-lockfile
-node scripts/build-desktop-agent-cli.mjs
+node scripts/distribution-release.mjs prepare --tag <稳定tag> --version <适配发行版本> --checkout <全新检出目录>
 ```
 
-桌面构建需生产环境变量。在 Linux / WSL 中执行：
+`prepare` 解析 tag 的完整提交，核对源码版本，在独立 worktree 中按 `patches/order.json` 的顺序和校验值应用补丁：接口、审查运行时、界面、发行更新。遇到冲突立即停止，保留新检出供维护者处理，不覆盖正在开发的目录。也可多次传入 `--patch` 指定维护者整理的提交补丁。
+
+完整源码补丁为 `zcode-auto-review.patch`。`scripts/export-host-patch.mjs` 和 `scripts/export-distribution-patches.mjs` 分别导出完整补丁与有序分组；`scripts/verify-delivery-source.py` 在干净基线复验源码补丁和 Codex 审查策略。
+
+## 构建与校验
+
+使用所选基线 `mise.toml` 规定的 Node、pnpm 和锁文件，先执行 `pnpm install --frozen-lockfile`。首版为 Node 24.14.0、pnpm 10.33.2。
 
 ```sh
-ZCODE_ENV=production pnpm --filter @zcode/desktop build:no-runtime-assets
-```
-
-在 PowerShell 中执行：
-
-```powershell
-$env:ZCODE_ENV = 'production'
-pnpm --filter @zcode/desktop build:no-runtime-assets
-```
-
-Agent 产物为 `apps/zcode-cli/packages/cli/dist/zcode.cjs`；桌面产物为 `packages/desktop/out`。
-
-## 复验审批链路
-
-回到本仓库根目录执行：
-
-```sh
+node scripts/distribution-release.mjs build --source <检出目录> --config <autoreview-release.json> --electron-assets <Windows运行资源目录> --out <交付目录>
 npm test
-npm run check
 npm run test:desktop
+npm run test:responses
+npm run test:approval-ui
+npm run test:updates
+python scripts/verify-delivery-source.py
 ```
 
-基础 CI 自动执行不需宿主依赖的核心用例、审查配置及协议辅助测试与语法检查。`test:desktop` 另外执行 15 个 Hook / 管道用例和 24 个常规宿主权限链路用例，依赖上面准备好的固定源码和 tsx。设置 `ZCODE_TEST_REVIEW_DEADLINE=1` 会启用额外的实际 90 秒总时限用例。
+构建工具依次重建 CLI 工作区、桌面 Agent、Desktop Main/Host/preload 和 renderer，校验编译后的独立产品身份，再生成完整 NSIS 安装器。`SOURCE.json` 记录版本、完整提交、工具链、锁文件、Agent/ASAR 指纹和原生资源来源。打包器验证编译产物的外部模块均可解析，避免仅在开发依赖目录中可启动的成品。
 
-Windows 若无法解析 WSL 的依赖符号链接，可在准备依赖的环境中运行 `node scripts/bundle-host-tests.mjs`，再由 Windows Node 执行 `node --test artifacts/acceptance/host-chain.bundle.mjs`。桌面界面自动化脚本在 `scripts/desktop-e2e.mjs`；它只用于开发验收，需要 Playwright 等宿主依赖和可启动的 Windows 构建，模型使用本机 HTTP 替身。
+Windows 构建需要 Windows Node 与 electron-builder 的 NSIS/rcedit 工具；WSL 可使用项目缓存中的 Windows Node，工具只作用于交付目录。旧 `stage-windows-desktop.mjs` / `stage-codex-auto-approval-desktop.mjs` 现在转到同一安装器组装入口，默认输出 `artifacts/autoreview/<适配版本>/`，不再覆盖旧便携包。
 
-Windows Node 执行 `node scripts/desktop-e2e.mjs --run --all` 验证完整桌面场景。`node scripts/desktop-review-settings.mjs` 验证配置与重启；`node artifacts/0.1.3/acceptance/desktop-live-review.bundle.mjs .` 在 Windows 隔离宿主使用 `DEEPSEEK_API_KEY` 验证官方 deepseek-flash / High 的真实审批和文件调查。`--run --glm-deepseek-review` 验证 GLM 主会话与 DeepSeek 审查；`--run --live-glm` 在临时配置中继承当前 GLM 原生配置并强制测试动作经过审批；退出后删除临时凭据配置，结果只保留脱敏归属信息。真实提供商失败不能当作审查成功。
-
-## 组装独立 Windows 发行
-
-准备一份干净的 ZCode 3.14.4 Windows x64 安装目录，作为 Electron / 原生资源来源。不要将用户配置、登录信息、会话或缓存放入该目录。关闭目标适配桌面后，从本仓库根目录执行：
+还须执行上游全量 typecheck、lint、架构检查，并与相同提交的干净基线区分既有诊断；新增问题阻断发布。Windows 成品验证使用独立 acceptance appId 与隔离配置，完成两个测试版本的真实安装、下载、重启升级、数据保留和手动回退。
 
 ```sh
-node scripts/stage-codex-auto-approval-desktop.mjs "C:/Apps/ZCode"
-python scripts/build-release.py
+node scripts/build-update-acceptance.mjs <Windows运行资源目录>
+# 以下命令使用 Windows Node 执行
+node scripts/windows-update-acceptance.mjs
+node scripts/desktop-e2e.mjs --run --all --desktop <成品EXE> --output <验收目录> --fixture-bundle <新构建的fixture.bundle.mjs> --marketplace <插件marketplace>
+node scripts/desktop-responses-e2e.mjs --desktop <成品目录> --output <验收目录> --fixture-bundle <fixture.bundle.mjs> --marketplace <插件marketplace> --mode fixture
 ```
 
-路径参数指向资源来源目录，里面应有 `ZCode.exe`、`resources/app.asar` 和 `resources/glm/zcode.cjs`。脚本写入本仓库的 `artifacts/0.1.3/CodexAutoApproval-Windows/`，不覆盖来源目录。也可在 WSL 中把参数换成挂载路径；构建结果仍为 Windows 发行。
+隔离验收完成后以本机配置进行脱敏验证。实际提供商失败不能当作审查成功；凭据、用户文本和完整模型流量不得进入公开验收记录。
 
-重建插件代码时运行 `npm run package:desktop`。插件使用 `PATH` 中的系统 Node.js 22 或以上；打包脚本清理旧的随包运行时，发行 ZIP 不包含 Node。安装者需安装 Windows Node.js 并加入 `PATH`，用 `node --version` 确认版本，随后重启桌面。
+## 安装、升级与发布
 
-`python scripts/build-release.py` 在 `artifacts/0.1.3/` 生成插件 ZIP、桌面 ZIP、补丁副本和 SHA256SUMS.txt。桌面内 `AUTO-REVIEW-BUILD.json` 记录原始 / 适配 Agent 与 app.asar 指纹以及源码来源。
+运行 `ZCodeAutoReview-<发行版本>-win-x64.exe`，默认安装到 `D:\CodexAutoReview\zcode\runtime\ZCodeAutoReview`。固定入口为 `ZCodeAutoReview.exe`，快捷方式名为 **ZCode AutoReview**。应用、卸载项、Windows 标识和更新缓存均与官方版本隔离，沿用旧适配版用户数据和 `.zcode` 设置。
 
-需要重新核对 Codex 策略时，在本仓库同级准备 OpenAI Codex 源码并获取提交 `d42056091aded7feb1d88ac7e83972108b2aa478`，再执行 `python scripts/verify-delivery-source.py`。该脚本比较策略正文，并在临时干净文件中复验完整宿主补丁；不运行 Codex。
+首次安装后运行 `scripts/migrate-autoreview-shortcuts.ps1`。只重定向精确指向旧适配 EXE 的快捷方式，保存原快捷方式备份和收据；保留旧 `artifacts/0.1.3` 目录。旧版正在运行时须正常退出，再从固定入口启动新版本。
 
-## 宿主改动与使用边界
+启动异步检查本仓库稳定通道，下载和重启均由用户确认。所有窗口和 Host/Agent 均空闲并停止准入后才能安装。适配版不会访问官方更新源，也不自动降级。每次安装将已验证安装器缓存到安装目录之外，供修复和数据兼容的手动回退。
 
-补丁包含私有审批管道、独立审查模型解析与原生适配器、快照绑定、Hook 结果优先级、ask / 中断传播，以及独立 CodexAutoApproval 权限菜单。新版直接启动 `ZCode.exe`，默认应用身份仍是 `ZCode AutoReview`，沿用旧适配版配置目录；启动新版前退出旧版。
+```sh
+node scripts/distribution-release.mjs manifest --config <发行配置> --out <交付目录>
+node scripts/distribution-release.mjs publish --config <发行配置> --out <交付目录> --checks <绑定安装器SHA256的验收收据>
+```
 
-0.1.3 显式传递审查所属会话、轮次、query 与工具 TraceContext，并用原生 streamText 收集结果。仅启用的本插件能力实行审查优先：allow/deny 不发布人工请求；技术失败先登记应答，再显示原因和人工窗口。运行时及回放保存审查开始、完成状态和实际审查模型。桥协议为 v2，桌面与插件必须配套。原生插件配置服务保存用户／工作区的模型引用，工作区覆盖用户默认；主会话模型独立。思考内容与供应商续接元数据只保存在当前绑定的私有上下文，取消、重试、失效和完成时清理，自动审查不写完整模型轨迹。
+发布只由维护者手动执行：版本固定资产上传并重新下载校验后，最后推进主分支 `updates/windows-x64/stable/latest.yml`。插件发行与桌面稳定索引独立，测试包禁止发布。首版不进行数据库迁移；后续遇到不兼容数据格式时须先设计迁移和回退。
 
-菜单通过原生插件服务写入工作区启停设置；原生权限模式、Plan 约束和更新机制保留。官方更新可能替换适配代码，升级后需重新核对桥和菜单。
+审批桥包含独立审查模型、快照绑定、allow/deny/ask、调查工具、Chat Completions 和 Responses 私有续接、取消/失效清理与原生权限/Plan 边界。模型凭据留在宿主，不传给插件。首期支持 Windows x64 本地工作区；SSH、WSL 和远程工作区不进入稳定安装验收范围。
 
-公开 [Hooks](https://zcode.z.ai/en/docs/hooks) 不提供完整运行时授权来源及当前模型句柄，因此完整功能需要宿主补丁。[插件规范](https://zcode.z.ai/en/docs/plugin)负责插件安装，不能代替宿主桥。0.1.3 需手动解压插件 ZIP 后添加本地 marketplace；移除随包 Node 后满足 GitHub 归档入口的单文件 50 MiB 限制，仓库地址安装尚未复验。凭据留在宿主，不传入插件。
-
-本次实测与已知限制见 [验收记录](../docs/desktop-acceptance.md)；SSH、WSL、远程工作区和其他桌面系统仍未验证。
-
-0.1.3 仅本地交付；保留 `artifacts/0.1.2/` 供回退，无数据库迁移或公开发布。最终检查与真实模型状态以验收报告为准。
-
-## Responses 续接修复与最终包复验
-
-当前补丁包含审查专用的 Responses 无状态请求选项以及私有续接配对校验。完成源码准备与模块构建后运行 `npm run test:responses`。测试覆盖原失败行为、多轮、多调用、加密推理、隔离与错误不执行。
-
-2026-10-02 本机自动审查选择改用独立 Chat Completions 供应商，最终 Windows 包的真实插件链路已通过。新脚本显式接收成品与 profile 路径，不再依赖旧交付目录；参数及验证范围见[最终成品验收](../docs/desktop-responses-acceptance-2026-10-02.md)。本次仅推送源码，未创建新公开 Release。
+安装和维护细节见 [升级说明](../docs/distribution-upgrades.md)，既有审批验收见 [桌面验收记录](../docs/desktop-acceptance.md)。

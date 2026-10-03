@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {
+      "file": "01-contract.patch",
+      "sha256": "9d99e3cb988e43e72a926feef28b89c244ce5e707971e5579f6e21a0e6c1324b"
+    },
+    {
+      "file": "02-runtime.patch",
+      "sha256": "33d5e31eddd60e4a219213c4e0c07728de5988b419163bb79bb0855c657443c2"
+    },
+    {
+      "file": "03-interface.patch",
+      "sha256": "a124cb5271c8547a26100916d0958dc846318e17adbec56f0f4183a937d7c26f"
+    },
+    {
+      "file": "04-distribution.patch",
+      "sha256": "169a04e1ea6b2fe7c6cc537ad76bb163ea52b151bd16e579a5d8ac12d7c53f5c"
+    }
+  ]
+}

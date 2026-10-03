@@ -1,0 +1,854 @@
+diff --git a/packages/ui/src/PermissionDialog.tsx b/packages/ui/src/PermissionDialog.tsx
+index c78c5bd..98d753f 100644
+--- a/packages/ui/src/PermissionDialog.tsx
++++ b/packages/ui/src/PermissionDialog.tsx
+@@ -47,6 +47,7 @@ import { isSaveWorkflowToolCall } from "@/lib/workflowToolNames.js";
+ import { useZCodeStoreWithDefault } from "@/store/StoreProvider.js";
+ import { DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
+ import { useZCodeIntl } from "./i18n/IntlProvider.js";
++import { ApprovalReviewFailureNotice } from "./components/ApprovalReviewFailureNotice.js";
+ import { Info, LoaderIcon, WrenchIcon } from "lucide-react";
+ 
+ const MCP_PERMISSION_TOOL_ICON = <WrenchIcon className="size-4 shrink-0 text-foreground-subtle" />;
+@@ -696,14 +697,16 @@ export function PermissionDialog({
+           <div className="space-y-4">
+             <div className="flex flex-wrap items-center gap-2">
+               <p className="text-ui-base font-medium leading-tight text-foreground-subtle">
+-                {intl.formatMessage({ id: "chat.permission.title" })}
++                {intl.formatMessage({ id: request.reviewFailure ? "chat.permission.autoReviewFailed" : "chat.permission.title" })}
+               </p>
+               <InteractionRequestOriginBadge origin={request.origin} />
+             </div>
+             {!shouldUseSwitchModePlaceholder &&
+             !shouldUseWorkflowBlock &&
+             !shouldUseSaveWorkflowBlock &&
+-            displayReason ? (
++            request.reviewFailure ? (
++              <ApprovalReviewFailureNotice failure={request.reviewFailure} intl={intl} />
++            ) : displayReason ? (
+               <p className="text-ui-base leading-5 text-foreground">{displayReason}</p>
+             ) : null}
+             {shouldUseSwitchModePlaceholder ? (
+@@ -731,7 +734,7 @@ export function PermissionDialog({
+           <div className="space-y-1">
+             <div
+               role="listbox"
+-              aria-label={intl.formatMessage({ id: "chat.permission.title" })}
++              aria-label={intl.formatMessage({ id: request.reviewFailure ? "chat.permission.autoReviewFailed" : "chat.permission.title" })}
+               className="space-y-1"
+             >
+               {orderedOptions.map((option, index) => {
+diff --git a/packages/ui/src/SettingsPage.tsx b/packages/ui/src/SettingsPage.tsx
+index 554b0d5..39d80a6 100644
+--- a/packages/ui/src/SettingsPage.tsx
++++ b/packages/ui/src/SettingsPage.tsx
+@@ -1838,6 +1838,7 @@ export function SettingsPage({
+                             isDesktop={Boolean(isDesktop)}
+                             isMacDesktop={Boolean(isMacDesktop)}
+                             isWindowsDesktop={Boolean(isWindowsDesktop)}
++                            onManageModels={handleOpenModelProviderSettings}
+                             initialTab={pluginTab}
+                             initialScopeKey={pluginScopeKey}
+                             workspacePath={activeWorkspacePath}
+diff --git a/packages/ui/src/i18n/locales/en-US.ts b/packages/ui/src/i18n/locales/en-US.ts
+index 4ec0bc4..08cfcee 100644
+--- a/packages/ui/src/i18n/locales/en-US.ts
++++ b/packages/ui/src/i18n/locales/en-US.ts
+@@ -4164,6 +4164,11 @@ const enUS: Record<string, string> = {
+   "settings.plugins.marketplace.componentsRetry": "Retry",
+   "settings.plugins.marketplace.componentsEmpty":
+     "This plugin doesn't declare components, or they couldn't be read.",
++  "settings.plugins.reviewModel.invalid": "Invalid review model configuration",
++  "settings.plugins.reviewModel.title": "Review model",
++  "settings.plugins.reviewModel.inherit": "Follow session",
++  "settings.plugins.reviewModel.description":
++    "Applies to the next automatic review. The session model stays unchanged.",
+   "settings.plugins.config.title": "Configuration",
+   "settings.plugins.config.required": "Required",
+   "settings.plugins.config.save": "Save configuration",
+@@ -5786,6 +5791,18 @@ const enUS: Record<string, string> = {
+   "chat.quota.action.refresh": "Refresh quota",
+ 
+   // Permissions
++  "chat.permission.autoReviewAllowed": "Review allowed",
++  "chat.permission.autoReviewDenied": "Review denied",
++  "chat.permission.autoReviewFailedShort": "Review failed",
++  "chat.permission.autoReviewCancelled": "Review cancelled",
++  "chat.permission.reviewProvider": "Provider",
++  "chat.permission.reviewModel": "Model",
++  "chat.permission.reviewReasoning": "Reasoning",
++  "chat.permission.autoReviewing": "Reviewing automatically",
++  "chat.permission.autoReviewFailed": "Automatic review failed; manual confirmation required",
++  "chat.permission.autoReviewHttpStatus": "HTTP status: {status}",
++  "chat.permission.autoReviewRequestId": "Request ID: {requestId}",
++  "chat.permission.autoReviewProviderBlocked": "The provider blocked the automatic review request. The review could not complete, and the pending action has not run. Handle it manually here, or select an independent reviewer in Settings > Plugins > CodexAutoApproval > Advanced details > Review model. Changing models does not guarantee removal of the provider restriction.",
+   "chat.permission.title": "Permission required",
+   "chat.permission.awaitingApproval": "Awaiting approval",
+   "chat.permission.approve": "Allow",
+diff --git a/packages/ui/src/i18n/locales/zh-CN.ts b/packages/ui/src/i18n/locales/zh-CN.ts
+index 63b5482..e5ffc62 100644
+--- a/packages/ui/src/i18n/locales/zh-CN.ts
++++ b/packages/ui/src/i18n/locales/zh-CN.ts
+@@ -3896,6 +3896,10 @@ const zhCN: Record<string, string> = {
+   "settings.plugins.marketplace.componentsError": "组件清单加载失败，仅展示可得信息。",
+   "settings.plugins.marketplace.componentsRetry": "重试",
+   "settings.plugins.marketplace.componentsEmpty": "该插件未声明组件，或组件无法读取。",
++  "settings.plugins.reviewModel.invalid": "审查模型配置无效，请重新选择或恢复默认",
++  "settings.plugins.reviewModel.title": "审查模型",
++  "settings.plugins.reviewModel.inherit": "跟随会话",
++  "settings.plugins.reviewModel.description": "下一次自动审查生效，不改变主会话模型。",
+   "settings.plugins.config.title": "配置",
+   "settings.plugins.config.required": "必填",
+   "settings.plugins.config.save": "保存配置",
+@@ -5529,6 +5533,18 @@ const zhCN: Record<string, string> = {
+   "chat.quota.action.refresh": "刷新额度",
+ 
+   // 权限请求
++  "chat.permission.autoReviewAllowed": "自动审查通过",
++  "chat.permission.autoReviewDenied": "自动审查拒绝",
++  "chat.permission.autoReviewFailedShort": "自动审查失败",
++  "chat.permission.autoReviewCancelled": "自动审查已取消",
++  "chat.permission.reviewProvider": "供应商",
++  "chat.permission.reviewModel": "模型",
++  "chat.permission.reviewReasoning": "推理档位",
++  "chat.permission.autoReviewing": "正在自动审查",
++  "chat.permission.autoReviewFailed": "自动审查失败，需人工确认",
++  "chat.permission.autoReviewHttpStatus": "HTTP 状态码：{status}",
++  "chat.permission.autoReviewRequestId": "请求编号：{requestId}",
++  "chat.permission.autoReviewProviderBlocked": "供应商拦截了自动审查请求，审查未完成，待审批动作尚未执行。您可以在此人工处理，或前往 设置 > 插件 > CodexAutoApproval > 高级信息 > 审查模型，指定独立的审查模型。更换模型不保证解除供应商限制。",
+   "chat.permission.title": "需要权限",
+   "chat.permission.awaitingApproval": "等待确认",
+   "chat.permission.approve": "允许",
+diff --git a/packages/ui/src/settings/PluginConfigControls.tsx b/packages/ui/src/settings/PluginConfigControls.tsx
+index f552352..82d3c3e 100644
+--- a/packages/ui/src/settings/PluginConfigControls.tsx
++++ b/packages/ui/src/settings/PluginConfigControls.tsx
+@@ -34,7 +34,10 @@ export function PluginConfigControls({
+ }: PluginConfigControlsProps) {
+   const { intl } = useZCodeIntl();
+   const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
+-  const entries = Object.entries(plugin.userConfig ?? {});
++  // Codex 的结构化 reviewModel 由原生模型选择器编辑，不能投影成普通文本输入。
++  const entries = Object.entries(plugin.userConfig ?? {}).filter(
++    ([key]) => key !== "reviewModel" || plugin.id !== "codex-auto-approval@codex-auto-review-local",
++  );
+   if (entries.length === 0) return null;
+ 
+   const isSaving = operationId === `plugin:configure:${plugin.id}`;
+diff --git a/packages/ui/src/settings/PluginsSection.tsx b/packages/ui/src/settings/PluginsSection.tsx
+index 0a71a3b..de8e58d 100644
+--- a/packages/ui/src/settings/PluginsSection.tsx
++++ b/packages/ui/src/settings/PluginsSection.tsx
+@@ -44,6 +44,7 @@ import {
+   PluginHookDetails,
+   PluginWarningList,
+ } from "@/settings/InstalledPluginManagement.js";
++import { CodexReviewModelControls } from "@/settings/CodexReviewModelControls.js";
+ import { PluginConfigControls } from "@/settings/PluginConfigControls.js";
+ import {
+   PluginStoreAdvancedSection,
+@@ -123,6 +124,7 @@ interface PluginsSectionProps {
+   mode?: "plugin" | "mcp" | "skill" | "command";
+   workspacePath?: string | null;
+   workspaceIdentity?: string;
++  onManageModels?: () => void;
+   onCreateTask?: (request?: CreateTaskRequest) => void;
+   onOpenPluginStore: (returnScopeKey?: string, intent?: "add-marketplace") => void;
+   showMarketplaceBreadcrumb?: boolean;
+@@ -140,6 +142,7 @@ function PluginList({
+   isMacDesktop,
+   isWindowsDesktop,
+   onAdd,
++  onManageModels,
+   onCreateTask,
+   onDetailOpenChange,
+   onOpenPluginStore,
+@@ -153,6 +156,7 @@ function PluginList({
+   isMacDesktop: boolean;
+   isWindowsDesktop: boolean;
+   onAdd?: () => void;
++  onManageModels?: () => void;
+   onCreateTask?: (request?: CreateTaskRequest) => void;
+   onDetailOpenChange?: (open: boolean) => void;
+   onOpenPluginStore: (returnScopeKey?: string, intent?: "add-marketplace") => void;
+@@ -413,10 +417,11 @@ function PluginList({
+   ): string | number | boolean => {
+     const draft = pluginOptionsDrafts[plugin.id]?.[key];
+     if (draft === null) return "";
++    const configured = plugin.configuredOptions?.[key];
+     return (
+       draft ??
+-      plugin.configuredOptions?.[key] ??
+-      option.default ??
++      (typeof configured === "object" ? undefined : configured) ??
++      (typeof option.default === "object" ? undefined : option.default) ??
+       (option.type === "boolean" ? false : "")
+     );
+   };
+@@ -720,6 +725,19 @@ function PluginList({
+                 {(selectedPlugin.hookDetails ?? []).length > 0 ? (
+                   <PluginHookDetails hooks={selectedPlugin.hookDetails ?? []} />
+                 ) : null}
++                {selectedPlugin.id === "codex-auto-approval@codex-auto-review-local" ? (
++                  <CodexReviewModelControls
++                    key={`${targetKey}:${configScope}:${selectedPlugin.id}`}
++                    plugin={selectedPlugin}
++                    scope={configScope}
++                    modelService={
++                      (target ? targetServiceResolution.services : baseServices)
++                        .modelSelectionService
++                    }
++                    pluginService={pluginManagementService}
++                    onManageModels={onManageModels}
++                  />
++                ) : null}
+                 <PluginConfigControls
+                   getValue={getPluginOptionValue}
+                   isOptionClearPending={(pluginId, key) =>
+@@ -955,6 +973,7 @@ export function PluginsSection({
+   mode = "plugin",
+   workspacePath,
+   workspaceIdentity,
++  onManageModels,
+   onCreateTask,
+   onOpenPluginStore,
+   showMarketplaceBreadcrumb = false,
+@@ -1291,6 +1310,7 @@ export function PluginsSection({
+               isWindowsDesktop={isWindowsDesktop}
+               searchQuery={searchQueries.plugins}
+               onAdd={selectedScope.kind === "user" ? openPluginStoreForSelectedScope : undefined}
++              onManageModels={onManageModels}
+               onCreateTask={onCreateTask}
+               onDetailOpenChange={setPluginDetailOpen}
+               onOpenPluginStore={openPluginStoreForSelectedScope}
+diff --git a/packages/ui/src/store/pluginManagementStore.ts b/packages/ui/src/store/pluginManagementStore.ts
+index aa2e2ad..badb3ee 100644
+--- a/packages/ui/src/store/pluginManagementStore.ts
++++ b/packages/ui/src/store/pluginManagementStore.ts
+@@ -79,7 +79,7 @@ export interface PluginManagementState {
+   restoreBuiltin: (pluginId: string, pluginService: IPluginManagementService) => Promise<void>;
+   configurePlugin: (
+     pluginId: string,
+-    options: Record<string, string | number | boolean>,
++    options: Parameters<IPluginManagementService["configurePlugin"]>[0]["options"],
+     pluginService: IPluginManagementService,
+     scope?: ZCodePluginScope,
+     clearOptionKeys?: string[],
+diff --git a/packages/ui/src/v4/ConversationAgentToolCallRow.tsx b/packages/ui/src/v4/ConversationAgentToolCallRow.tsx
+index 2e477aa..28f79cf 100644
+--- a/packages/ui/src/v4/ConversationAgentToolCallRow.tsx
++++ b/packages/ui/src/v4/ConversationAgentToolCallRow.tsx
+@@ -1,3 +1,4 @@
++import { PermissionReviewStatus } from "./PermissionReviewStatus.js";
+ import { useCallback, useMemo } from "react";
+ import { TID_V4_ROW, TID_V4_SUBAGENT_OPEN_SIDE_PANE, testId } from "@zcode/shared";
+ import { ToolCallBlock } from "@/ToolCallBlocks.js";
+@@ -79,6 +80,7 @@ export function ConversationAgentToolCallRow({
+       data-conversation-selectable="true"
+       data-testid={testId(TID_V4_ROW, String(item.row.rowId))}
+     >
++      <PermissionReviewStatus row={item.row} />
+       <ToolCallBlock
+         toolCallNode={toolCallNode}
+         workspacePath={context.workspacePath}
+diff --git a/packages/ui/src/v4/ConversationComposer.tsx b/packages/ui/src/v4/ConversationComposer.tsx
+index 913ae0d..eb0f0ea 100644
+--- a/packages/ui/src/v4/ConversationComposer.tsx
++++ b/packages/ui/src/v4/ConversationComposer.tsx
+@@ -2142,6 +2142,9 @@ function ConversationComposerImpl({
+         <V4ComposerModeSwitch
+           workspacePath={workspacePath}
+           workspaceIdentity={workspaceIdentity}
++          remoteSessionId={remoteSessionId}
++          currentSessionBusy={canStop}
++          sessionId={sessionId}
+           provider={provider}
+           draftConfig={draftConfig}
+           disabled={disabled}
+diff --git a/packages/ui/src/v4/ConversationRowView.tsx b/packages/ui/src/v4/ConversationRowView.tsx
+index 3827166..c9aabf5 100644
+--- a/packages/ui/src/v4/ConversationRowView.tsx
++++ b/packages/ui/src/v4/ConversationRowView.tsx
+@@ -1,3 +1,4 @@
++import { PermissionReviewStatus } from "./PermissionReviewStatus.js";
+ /* oxlint-disable eslint(max-lines) -- v4 逐行 row 渲染分发集中收口（每种 row 一个 memo 叶子 + timelineMarker 分隔线），拆分会打散行类型对照。 */
+ import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
+ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+@@ -1987,6 +1988,7 @@ const ToolCallRowView = memo(function ToolCallRowView({
+   return (
+     <RowShell rowId={row.rowId} className="py-0">
+       <div data-conversation-selectable="true">
++        <PermissionReviewStatus row={row} />
+         <ToolCallBlock
+           toolCallNode={toolCallNode}
+           workspacePath={context.workspacePath}
+diff --git a/packages/ui/src/v4/composer/V4ComposerModeControls.tsx b/packages/ui/src/v4/composer/V4ComposerModeControls.tsx
+index 0676cf3..626114b 100644
+--- a/packages/ui/src/v4/composer/V4ComposerModeControls.tsx
++++ b/packages/ui/src/v4/composer/V4ComposerModeControls.tsx
+@@ -1,5 +1,5 @@
+ import { memo, useCallback, useMemo } from "react";
+-import { LightbulbIcon, XIcon, ChevronDownIcon } from "lucide-react";
++import { LightbulbIcon, XIcon, ChevronDownIcon, ShieldCheckIcon } from "lucide-react";
+ import {
+   TID_CHAT_MODE_SELECT_TRIGGER,
+   TID_CHAT_MODE_SELECT_ITEM,
+@@ -34,11 +34,20 @@ import {
+   useToolbarShortcutBindings,
+ } from "@/v4/composer/toolbarShortcuts.js";
+ import type { V4ComposerToolbarProps } from "@/v4/composer/V4ComposerToolbar.js";
++import {
++  CODEX_AUTO_APPROVAL_MODE,
++  useCodexAutoApprovalMode,
++} from "@/hooks/useCodexAutoApprovalMode.js";
+ 
+ function noop(): void {}
+ 
+-/** Plan 是独立勾选项，三种权限仍为单选；只编辑草稿，不向 Runtime 发切换命令。 */
++/** Plan 是独立约束；CodexAutoApproval 通过原生插件服务启停，原生权限仍由草稿 owner 管理。 */
+ function V4ComposerModeSwitchImpl({
++  workspacePath,
++  workspaceIdentity,
++  remoteSessionId,
++  currentSessionBusy,
++  sessionId,
+   provider,
+   draftConfig,
+   disabled,
+@@ -55,8 +64,19 @@ function V4ComposerModeSwitchImpl({
+   | "activeConfigPicker"
+   | "onConfigPickerOpenChange"
+   | "onSwitchMode"
+->) {
+-  const { intl } = useZCodeIntl();
++  | "sessionId"
++> & { remoteSessionId?: string; currentSessionBusy?: boolean }) {
++  const { intl, locale } = useZCodeIntl();
++  const approval = useCodexAutoApprovalMode({
++    workspacePath,
++    workspaceIdentity,
++    remoteSessionId,
++    currentSessionBusy,
++    sessionId,
++    mode: draftConfig?.mode ?? "build",
++    disabled,
++    onSwitchMode,
++  });
+   const displayProvider = provider ?? ZCODE_AGENT_PROVIDER;
+   const modeShortcutLabel = useShortcutCommandLabel("cycleSessionMode");
+   const modes = getZCodeAgentAvailableModes();
+@@ -74,20 +94,25 @@ function V4ComposerModeSwitchImpl({
+       name: "Mode",
+       category: "mode",
+       type: "select",
+-      currentValue: draftConfig?.mode ?? "build",
++      currentValue: approval.selectedValue,
+       options: getZCodeAgentAvailableModes()
+         .filter((mode) => mode.id !== "plan")
+-        .map((mode) => ({ value: mode.id, name: mode.name })),
++        .flatMap((mode) => [
++          { value: mode.id, name: mode.name },
++          ...(mode.id === "build" && approval.visible && !approval.enableRequiresNewSession
++            ? [{ value: CODEX_AUTO_APPROVAL_MODE, name: "CodexAutoApproval" }]
++            : []),
++        ]),
+     }),
+-    [draftConfig?.mode],
++    [approval.selectedValue, approval.visible, approval.enableRequiresNewSession],
+   );
+   const cycle = useCallback(() => {
+     const next = getNextConfigSelectValue(modeOption);
+-    if (next) onSwitchMode(next);
+-  }, [modeOption, onSwitchMode]);
++    if (next) void approval.select(next);
++  }, [modeOption, approval.select]);
+   useToolbarShortcutBindings({
+     hasAnyOption: Boolean(selected),
+-    toolbarDisabled: disabled,
++    toolbarDisabled: approval.blocked,
+     modelMenuDisabled: true,
+     modeOption,
+     onCycleSessionMode: cycle,
+@@ -95,12 +120,19 @@ function V4ComposerModeSwitchImpl({
+     onCycleThoughtLevel: noop,
+   });
+   if (!selected) return null;
+-  const Icon = resolveModeOptionIcon(selected.id);
++  const Icon =
++    approval.selectedValue === CODEX_AUTO_APPROVAL_MODE
++      ? ShieldCheckIcon
++      : resolveModeOptionIcon(selected.id);
++  const chinese = locale.startsWith("zh");
+   return (
+     <div className="flex min-w-0 items-center gap-1">
+       <DropdownMenu
+         open={activeConfigPicker === "mode"}
+-        onOpenChange={(open) => onConfigPickerOpenChange("mode", open)}
++        onOpenChange={(open) => {
++          onConfigPickerOpenChange("mode", open);
++          if (open) void approval.refresh();
++        }}
+       >
+         <ControlHintTooltip
+           title={intl.formatMessage({ id: "chat.toolbar.mode.label" })}
+@@ -122,7 +154,9 @@ function V4ComposerModeSwitchImpl({
+             >
+               <Icon className="size-4" />
+               <span className="inline group-data-[composer-compact=true]/mode:hidden">
+-                {label(selected)}
++                {approval.selectedValue === CODEX_AUTO_APPROVAL_MODE
++                  ? "CodexAutoApproval"
++                  : label(selected)}
+               </span>
+               <ChevronDownIcon className="size-3.5 group-data-[composer-compact=true]/mode:hidden" />
+             </Button>
+@@ -142,6 +176,7 @@ function V4ComposerModeSwitchImpl({
+         >
+           <DropdownMenuCheckboxItem
+             checked={draftConfig?.planEnabled ?? false}
++            disabled={approval.blocked}
+             onCheckedChange={(checked) => onSwitchMode(checked ? "plan" : "plan-off")}
+             data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, "plan")}
+             className="min-h-13 items-start gap-3 py-2"
+@@ -157,7 +192,32 @@ function V4ComposerModeSwitchImpl({
+             </span>
+           </DropdownMenuCheckboxItem>
+           <DropdownMenuSeparator />
+-          <DropdownMenuRadioGroup value={selected.id} onValueChange={onSwitchMode}>
++          <DropdownMenuRadioGroup
++            value={approval.selectedValue}
++            onValueChange={(value) => void approval.select(value)}
++          >
++            {approval.visible && (
++              <DropdownMenuRadioItem
++                value={CODEX_AUTO_APPROVAL_MODE}
++                disabled={approval.blocked || approval.enableRequiresNewSession}
++                data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, CODEX_AUTO_APPROVAL_MODE)}
++                className="min-h-13 items-start gap-3 py-2"
++              >
++                <ShieldCheckIcon className="mt-0.5 size-4.5 shrink-0" />
++                <span className="flex min-w-0 flex-col gap-0.5">
++                  <span>CodexAutoApproval</span>
++                  <span className="text-ui-sm text-foreground-subtle">
++                    {approval.enableRequiresNewSession
++                      ? chinese
++                        ? "请新建会话后启用；已有会话的插件目录已固定。"
++                        : "Start a new session to enable this plugin."
++                      : chinese
++                        ? "由Codex迁移的自动审批"
++                        : "Review with the current model. Workspace setting; failures ask you."}
++                  </span>
++                </span>
++              </DropdownMenuRadioItem>
++            )}
+             {permissions.map((mode) => {
+               const ModeIcon = resolveModeOptionIcon(mode.id);
+               const descriptionId = getModeOptionDescriptionMessageId(displayProvider, {
+@@ -167,6 +227,7 @@ function V4ComposerModeSwitchImpl({
+                 <DropdownMenuRadioItem
+                   key={mode.id}
+                   value={mode.id}
++                  disabled={approval.blocked}
+                   data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, mode.id)}
+                   className="min-h-13 items-start gap-3 py-2"
+                 >
+@@ -183,6 +244,11 @@ function V4ComposerModeSwitchImpl({
+               );
+             })}
+           </DropdownMenuRadioGroup>
++          {approval.error && (
++            <div role="alert" className="px-2 py-1 text-ui-sm text-destructive">
++              {approval.error}
++            </div>
++          )}
+         </DropdownMenuContent>
+       </DropdownMenu>
+       {draftConfig?.planEnabled && (
+diff --git a/packages/ui/src/v4/pendingInteractionAdapter.ts b/packages/ui/src/v4/pendingInteractionAdapter.ts
+index 5054742..7ff6c29 100644
+--- a/packages/ui/src/v4/pendingInteractionAdapter.ts
++++ b/packages/ui/src/v4/pendingInteractionAdapter.ts
+@@ -76,6 +76,7 @@ export function pendingPermissionToLegacyRequest(
+     traceId: sessionId,
+     requestId: interaction.interactionId,
+     description: payload.summary,
++    ...(payload.reviewFailure ? { reviewFailure: payload.reviewFailure } : {}),
+     kind: payload.toolName,
+     title: payload.toolName,
+     options,
+diff --git a/packages/ui/src/components/ApprovalReviewFailureNotice.tsx b/packages/ui/src/components/ApprovalReviewFailureNotice.tsx
+new file mode 100755
+index 0000000..fb548e6
+--- /dev/null
++++ b/packages/ui/src/components/ApprovalReviewFailureNotice.tsx
+@@ -0,0 +1,21 @@
++import type { IntlInstance } from "../i18n/IntlProvider.js";
++
++export function ApprovalReviewFailureNotice({ failure, intl }: { failure: { code: string; message: string; httpStatus?: number; requestId?: string }; intl: IntlInstance }) {
++  return (
++    <div className="space-y-2" data-testid="auto-review-failure">
++      {failure.code === "provider_request_blocked" ? (
++        <p className="text-ui-base leading-5 text-foreground">
++          {intl.formatMessage({ id: "chat.permission.autoReviewProviderBlocked" })}
++        </p>
++      ) : null}
++      <p className="text-ui-base leading-5 text-foreground break-all">{failure.code}: {failure.message}</p>
++      {failure.httpStatus !== undefined || failure.requestId ? (
++        <p className="text-ui-caption leading-5 text-foreground-subtle break-all">
++          {failure.httpStatus !== undefined ? intl.formatMessage({ id: "chat.permission.autoReviewHttpStatus" }, { status: failure.httpStatus }) : null}
++          {failure.httpStatus !== undefined && failure.requestId ? " · " : null}
++          {failure.requestId ? intl.formatMessage({ id: "chat.permission.autoReviewRequestId" }, { requestId: failure.requestId }) : null}
++        </p>
++      ) : null}
++    </div>
++  );
++}
+diff --git a/packages/ui/src/hooks/useCodexAutoApprovalMode.ts b/packages/ui/src/hooks/useCodexAutoApprovalMode.ts
+new file mode 100755
+index 0000000..48ab636
+--- /dev/null
++++ b/packages/ui/src/hooks/useCodexAutoApprovalMode.ts
+@@ -0,0 +1,107 @@
++import { useCallback, useEffect, useRef } from "react";
++import { isRemoteWorkspaceIdentity } from "@zcode/shared";
++import { usePlatform } from "@/hooks/usePlatform.js";
++import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
++import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
++import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
++import { getVisibleTaskMetas, getWorkspaceState } from "@/store/zcodeSessionStoreSelectors.js";
++
++export const CODEX_AUTO_APPROVAL_MODE = "codex-auto-approval";
++const PLUGIN_ID = "codex-auto-approval@codex-auto-review-local";
++const RUNNING_STATUSES = new Set(["creating", "restoring", "streaming"]);
++
++export function useCodexAutoApprovalMode(params: {
++  workspacePath: string;
++  workspaceIdentity?: string;
++  remoteSessionId?: string;
++  currentSessionBusy?: boolean;
++  sessionId: string | null;
++  mode: string;
++  disabled: boolean;
++  onSwitchMode: (mode: string) => void;
++}) {
++  const platform = usePlatform();
++  const service = useBaseWorkspaceServices().pluginManagementService;
++  const identity = params.workspaceIdentity?.trim() || null;
++  const supported = Boolean(
++    params.workspacePath &&
++    service &&
++    typeof platform.executeDesktopCommand === "function" &&
++    /Windows/i.test(navigator.userAgent) &&
++    !params.remoteSessionId &&
++    !(identity && isRemoteWorkspaceIdentity(identity)),
++  );
++  const state = usePluginManagementStore();
++  const sameContext =
++    state.workspacePath === params.workspacePath &&
++    state.workspaceIdentity === identity &&
++    state.configScope === null;
++  const plugin = sameContext ? state.plugins.find((item) => item.id === PLUGIN_ID) : undefined;
++  const enableRequiresNewSession = Boolean(params.sessionId && !plugin?.enabled);
++  const workspaceBusy = useZCodeSessionStore((sessions) => {
++    const workspace = getWorkspaceState(sessions, params.workspacePath, identity ?? undefined);
++    return (
++      Object.values(workspace.taskRuntimeByTaskId ?? {}).some(
++        (runtime) => RUNNING_STATUSES.has(runtime.status) || Boolean(runtime.activeInputId?.trim()),
++      ) || getVisibleTaskMetas(workspace).some((task) => task.status === "running")
++    );
++  });
++  const blocked =
++    params.disabled ||
++    Boolean(params.currentSessionBusy) ||
++    workspaceBusy ||
++    Boolean(state.togglingPluginId || state.operationId) ||
++    (supported && (!sameContext || state.loading));
++  const activeContext = useRef("");
++  activeContext.current = `${params.workspacePath}\0${identity ?? ""}`;
++  const initializedContext = useRef("");
++  const refresh = useCallback(async () => {
++    if (!supported || !service) return;
++    await usePluginManagementStore.getState().initialize({
++      workspacePath: params.workspacePath,
++      ...(identity ? { workspaceIdentity: identity } : {}),
++      pluginService: service,
++    });
++  }, [identity, params.workspacePath, service, supported]);
++  useEffect(() => {
++    if (!supported || initializedContext.current === activeContext.current) return;
++    initializedContext.current = activeContext.current;
++    void refresh();
++  }, [refresh, supported]);
++  useEffect(() => {
++    // 用户级启用是新会话的默认值。先对齐正常 build 权限，避免菜单显示原生编辑却仍运行审查。
++    if (supported && plugin?.enabled && !blocked && params.mode !== "build") {
++      params.onSwitchMode("build");
++    }
++  }, [blocked, params.mode, params.onSwitchMode, plugin?.enabled, supported]);
++
++  const select = useCallback(
++    async (value: string) => {
++      if (blocked) return;
++      if (!supported || !plugin) {
++        if (value !== CODEX_AUTO_APPROVAL_MODE) params.onSwitchMode(value);
++        return;
++      }
++      const context = activeContext.current;
++      const enabled = value === CODEX_AUTO_APPROVAL_MODE;
++      if (enabled && enableRequiresNewSession) return;
++      const success = await usePluginManagementStore
++        .getState()
++        .setEnabled(PLUGIN_ID, enabled, service, "workspace");
++      // 启停 RPC 完成时可能已切换工作区；旧请求不得再写入新草稿。
++      if (!success || activeContext.current !== context) return;
++      params.onSwitchMode(enabled ? "build" : value);
++    },
++    [blocked, enableRequiresNewSession, params.onSwitchMode, plugin, service, supported],
++  );
++
++  return {
++    visible: supported && Boolean(plugin),
++    selectedValue: supported && plugin?.enabled ? CODEX_AUTO_APPROVAL_MODE : params.mode,
++    blocked,
++    enableRequiresNewSession,
++    select,
++    refresh,
++    error: sameContext && state.lastFailedPluginId === PLUGIN_ID ? state.error : null,
++  };
++}
+diff --git a/packages/ui/src/settings/CodexReviewModelControls.tsx b/packages/ui/src/settings/CodexReviewModelControls.tsx
+new file mode 100755
+index 0000000..6ca915e
+--- /dev/null
++++ b/packages/ui/src/settings/CodexReviewModelControls.tsx
+@@ -0,0 +1,162 @@
++import { useState } from "react";
++import { completeNewModelSelection } from "@zcode/provider";
++import {
++  ZCODE_AGENT_PROVIDER,
++  zcodeReviewModelSelectionSchema,
++  type ZCodeReviewModelSelection,
++  type ZCodePluginInfo,
++  type ZCodePluginScope,
++} from "@zcode/shared";
++import type { IModelSelectionService, IPluginManagementService } from "@zcode/services";
++import { ModelConfigSelect } from "@/ModelConfigSelect.js";
++import { Button } from "@/components/ui/button.js";
++import { useModelSelectionServiceView } from "@/hooks/useModelSelectionView.js";
++import { useZCodeIntl } from "@/i18n/IntlProvider.js";
++import { buildRegistryModelSelectGroups } from "@/lib/modelSelectionGroups.js";
++import { resolveModelThoughtOption } from "@/lib/modelThoughtOption.js";
++import { formatModelPickerValue, parseModelPickerValue } from "@/lib/zcodeSessionProjection.js";
++import { SettingsScopeBadge } from "@/settings/SettingsScopeBadge.js";
++import { SubagentReasoningField } from "@/settings/SubagentReasoningField.js";
++import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
++
++/** 插件配置是唯一事实；此组件只保留尚未提交的编辑草稿。 */
++export function CodexReviewModelControls({
++  plugin,
++  scope,
++  modelService,
++  pluginService,
++  onManageModels,
++}: {
++  plugin: ZCodePluginInfo;
++  scope: ZCodePluginScope;
++  modelService: IModelSelectionService;
++  pluginService: IPluginManagementService;
++  onManageModels?: () => void;
++}) {
++  const { intl } = useZCodeIntl();
++  const { state } = useModelSelectionServiceView(modelService);
++  const view = state.status === "ready" ? state.view : null;
++  const [draft, setDraft] = useState<ZCodeReviewModelSelection | null>(null);
++  const configure = usePluginManagementStore((store) => store.configurePlugin);
++  const saving = usePluginManagementStore(
++    (store) => store.operationId === `plugin:configure:${plugin.id}`,
++  );
++  const rawSaved = plugin.configuredOptions?.reviewModel;
++  const saved = zcodeReviewModelSelectionSchema.safeParse(rawSaved);
++  const invalidSaved = rawSaved !== undefined && !saved.success && draft === null;
++  const selection: ZCodeReviewModelSelection =
++    draft ?? (saved.success ? saved.data : { mode: "inherit" });
++  const groups = view ? buildRegistryModelSelectGroups(ZCODE_AGENT_PROVIDER, view) : [];
++  const value = selection.mode === "specified" ? formatModelPickerValue(selection) : "inherit";
++  const thought =
++    selection.mode === "specified" && view
++      ? resolveModelThoughtOption({
++          modelSelectionView: view,
++          providerId: selection.providerId,
++          modelId: selection.modelId,
++          currentValue: selection.options?.reasoningLevel,
++        })
++      : null;
++  const text = (id: string) => intl.formatMessage({ id });
++  return (
++    <div
++      className="mt-3 grid gap-2 border-t border-border pt-3"
++      data-testid="codex-review-model-config"
++      data-config-scope={scope}
++      data-review-model-mode={selection.mode}
++      data-review-provider-id={selection.mode === "specified" ? selection.providerId : undefined}
++      data-review-model-id={selection.mode === "specified" ? selection.modelId : undefined}
++      data-review-reasoning={
++        selection.mode === "specified" ? selection.options?.reasoningLevel : undefined
++      }
++    >
++      <div className="flex items-center gap-2 text-ui-base font-medium">
++        {text("settings.plugins.reviewModel.title")}
++        <SettingsScopeBadge scope={plugin.optionSources?.reviewModel ?? "default"} />
++      </div>
++      <div className="flex flex-wrap items-center gap-2">
++        <ModelConfigSelect
++          modelGroups={groups}
++          labelVisibilityClassName="inline-flex"
++          normalizedValue={invalidSaved ? "invalid" : value}
++          triggerLabel={
++            invalidSaved
++              ? text("settings.plugins.reviewModel.invalid")
++              : selection.mode === "inherit"
++                ? text("settings.plugins.reviewModel.inherit")
++                : selection.modelId
++          }
++          showManageModelsAction={Boolean(onManageModels)}
++          onManageModels={onManageModels}
++          manageModelsLabel={intl.formatMessage({ id: "chat.toolbar.model.manageModels" })}
++          lockReasonMessage=""
++          isItemLocked={() => false}
++          disabled={saving}
++          footerActions={[
++            {
++              key: "inherit",
++              label: text("settings.plugins.reviewModel.inherit"),
++              selected: selection.mode === "inherit",
++              onSelect: () => setDraft({ mode: "inherit" }),
++            },
++          ]}
++          onValueChange={(next) => {
++            if (!view) return;
++            const chosen = completeNewModelSelection(view, parseModelPickerValue(next));
++            if (chosen)
++              setDraft({
++                mode: "specified",
++                providerId: chosen.providerId,
++                modelId: chosen.modelId,
++                ...(chosen.options?.reasoningLevel
++                  ? { options: { reasoningLevel: chosen.options.reasoningLevel } }
++                  : {}),
++              });
++          }}
++        />
++        <SubagentReasoningField
++          intl={intl}
++          disabled={saving}
++          labelVisibilityClassName="inline-flex"
++          state={thought ? { kind: "supported", option: thought } : { kind: "not-applicable" }}
++          onValueCommit={(reasoningLevel) => {
++            if (selection.mode === "specified")
++              setDraft({ ...selection, options: { reasoningLevel } });
++          }}
++        />
++        {scope === "workspace" && plugin.optionSources?.reviewModel === "workspace" ? (
++          <Button
++            data-testid="codex-review-model-restore"
++            variant="ghost"
++            disabled={saving}
++            onClick={async () => {
++              if (await configure(plugin.id, {}, pluginService, scope, ["reviewModel"]))
++                setDraft(null);
++            }}
++          >
++            {intl.formatMessage({ id: "settings.plugins.config.restoreOption" })}
++          </Button>
++        ) : null}
++        <Button
++          data-testid="codex-review-model-save"
++          variant="outline"
++          disabled={saving || !draft}
++          onClick={async () => {
++            if (draft && (await configure(plugin.id, { reviewModel: draft }, pluginService, scope)))
++              setDraft(null);
++          }}
++        >
++          {intl.formatMessage({ id: "settings.plugins.config.save" })}
++        </Button>
++      </div>
++      {invalidSaved ? (
++        <p role="alert" className="text-ui-sm text-destructive">
++          {text("settings.plugins.reviewModel.invalid")}
++        </p>
++      ) : null}
++      <p className="text-ui-sm text-foreground-subtle">
++        {text("settings.plugins.reviewModel.description")}
++      </p>
++    </div>
++  );
++}
+diff --git a/packages/ui/src/v4/PermissionReviewStatus.tsx b/packages/ui/src/v4/PermissionReviewStatus.tsx
+new file mode 100755
+index 0000000..32ecd1e
+--- /dev/null
++++ b/packages/ui/src/v4/PermissionReviewStatus.tsx
+@@ -0,0 +1,62 @@
++import type { ToolCallRow } from "@zcode/shared/zcode-protocol-v4";
++import {
++  Tooltip,
++  TooltipContent,
++  TooltipProvider,
++  TooltipTrigger,
++} from "@/components/ui/tooltip.js";
++import { useZCodeIntl } from "@/i18n/IntlProvider.js";
++
++export function PermissionReviewStatus({ row }: { row: ToolCallRow }) {
++  const { intl } = useZCodeIntl();
++  const review = row.permissionReview;
++  if (!review) return null;
++  const reviewing = review.status === "reviewing";
++  // 旧进度不能覆盖终态工具；已完成审查是持久化事实，工具完成后仍需显示实际模型。
++  if (reviewing && ["success", "error", "cancelled"].includes(row.status)) return null;
++  const labels = {
++    reviewing: "chat.permission.autoReviewing",
++    allow: "chat.permission.autoReviewAllowed",
++    deny: "chat.permission.autoReviewDenied",
++    failed: "chat.permission.autoReviewFailedShort",
++    cancelled: "chat.permission.autoReviewCancelled",
++  };
++  const model = review.actualReviewModel;
++  const status = (
++    <p
++      role="status"
++      tabIndex={model ? 0 : undefined}
++      data-testid={reviewing ? "auto-review-progress" : "auto-review-result"}
++      data-review-status={review.status}
++      data-review-provider-id={model?.providerId}
++      data-review-model-id={model?.modelId}
++      data-review-reasoning={model?.options?.reasoningLevel}
++      className={`text-ui-caption text-foreground-subtle${reviewing ? " animate-pulse" : ""}`}
++    >
++      {intl.formatMessage({ id: labels[review.status] })}
++      {model ? ` · ${model.modelId}` : ""}
++    </p>
++  );
++  if (!model) return status;
++  return (
++    <TooltipProvider>
++      <Tooltip>
++        <TooltipTrigger asChild>{status}</TooltipTrigger>
++        <TooltipContent data-testid="auto-review-model-details" className="flex-col items-start">
++          <span>
++            {intl.formatMessage({ id: "chat.permission.reviewProvider" })}: {model.providerId}
++          </span>
++          <span>
++            {intl.formatMessage({ id: "chat.permission.reviewModel" })}: {model.modelId}
++          </span>
++          {model.options?.reasoningLevel ? (
++            <span>
++              {intl.formatMessage({ id: "chat.permission.reviewReasoning" })}:{" "}
++              {model.options.reasoningLevel}
++            </span>
++          ) : null}
++        </TooltipContent>
++      </Tooltip>
++    </TooltipProvider>
++  );
++}

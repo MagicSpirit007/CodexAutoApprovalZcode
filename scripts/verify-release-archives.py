@@ -3,10 +3,12 @@ from pathlib import Path
 import argparse, hashlib, json, re, zipfile
 p=argparse.ArgumentParser();p.add_argument('out',type=Path);args=p.parse_args();out=args.out.resolve()
 def digest(data):return hashlib.sha256(data).hexdigest()
+release=json.loads((Path(__file__).resolve().parents[1]/'release.config.json').read_text())
+version=release['pluginVersion']
 records=[]
 for name, directory, prefix, keys in [
- ('CodexAutoApproval-Windows-0.1.3.zip','CodexAutoApproval-Windows','CodexAutoApproval-Windows/', ['AUTO-REVIEW-BUILD.json','resources/glm/zcode.cjs','resources/glm/provider/zcode-builtin.json','resources/app.asar','ACCEPTANCE.md','CHECKS.json','docs/desktop-build-responses-2026-10-02.md','docs/responses-continuation-2026-10-02.md','evidence/responses-continuation-2026-10-02/live.json','evidence/build-responses-2026-10-02/windows/profile-cleanup.json','zcode-29628c9-auto-review.patch']),
- ('CodexAutoApproval-plugin-0.1.3.zip','local-marketplace','', ['marketplace.json','plugins/codex-auto-approval/.zcode-plugin/plugin.json','ACCEPTANCE.md','CHECKS.json','responses-continuation-2026-10-02.md','evidence/responses-continuation-2026-10-02/live.json'])]:
+ (f'CodexAutoApproval-Windows-{version}.zip','CodexAutoApproval-Windows','CodexAutoApproval-Windows/', ['AUTO-REVIEW-BUILD.json','resources/glm/zcode.cjs','resources/glm/provider/zcode-builtin.json','resources/app.asar','ACCEPTANCE.md','CHECKS.json','docs/desktop-build-responses-2026-10-02.md','docs/responses-continuation-2026-10-02.md','evidence/responses-continuation-2026-10-02/live.json','evidence/build-responses-2026-10-02/windows/profile-cleanup.json','zcode-auto-review.patch']),
+ (f'CodexAutoApproval-plugin-{version}.zip','local-marketplace','', ['marketplace.json','plugins/codex-auto-approval/.zcode-plugin/plugin.json','ACCEPTANCE.md','CHECKS.json','responses-continuation-2026-10-02.md','evidence/responses-continuation-2026-10-02/live.json'])]:
  with zipfile.ZipFile(out/name) as z:
   names=z.namelist();assert len(names)==len(set(names)), 'Duplicate entries'
   assert not any('/profile/' in n or 'asar-staging' in n for n in names), 'Private profile or temporary staging included'

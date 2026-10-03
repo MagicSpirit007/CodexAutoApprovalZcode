@@ -4,9 +4,9 @@
 
 权限菜单中的独立选项和插件列表均叫 **CodexAutoApproval**，选项下的小字为“由Codex迁移的自动审批”。「自动编辑」仍是 ZCode 原生功能。
 
-**当前本地交付：0.1.3 · Windows x64 本地桌面会话 · 第三方适配项目。** 完整功能需要本项目配套的适配桌面；只在官方桌面安装插件，会因缺少审批桥而回到人工审批。这里移植的是审批核心，不是 Codex 全量复现，也不是 OpenAI 或 ZCode 官方发行。
+**适配桌面发行：0.2.0；插件：0.1.3；上游源码基线：3.14.3。Windows x64 本地桌面会话，第三方适配项目。** 完整功能需要本项目配套的适配桌面；只在官方桌面安装插件，会因缺少审批桥而回到人工审批。这里移植的是审批核心，不是 Codex 全量复现，也不是 OpenAI 或 ZCode 官方发行。
 
-[本次修复与成品验收](docs/desktop-responses-acceptance-2026-10-02.md) · [Responses 源码续接修复](docs/responses-continuation-2026-10-02.md) · [构建记录](docs/desktop-build-responses-2026-10-02.md) · [功能对照](docs/migration.md) · [源码构建](host-adapter/README.md)。0.1.3 产物目前仅本地交付，Git 仓库提供源码和补丁；此前验收见 [0.1.3](docs/desktop-acceptance.md)、[0.1.2](docs/desktop-acceptance-0.1.2.md)。[已发布的 0.1.1](https://github.com/MagicSpirit007/CodexAutoApprovalZcode/releases/tag/v0.1.1) 不包含本次修复。
+[0.2.0 安装升级验收](docs/autoreview-0.2.0-acceptance.md) · [稳定升级说明](docs/distribution-upgrades.md) · [Responses 源码续接修复](docs/responses-continuation-2026-10-02.md) · [功能对照](docs/migration.md) · [源码构建](host-adapter/README.md)。此前便携版验收见 [0.1.3](docs/desktop-acceptance.md)、[0.1.2](docs/desktop-acceptance-0.1.2.md)。
 
 0.1.3 增加独立审查模型配置，复用宿主供应商、原生协议适配器及密钥管理。指定后只调用所选模型，技术失败转人工。进度和完成记录显示实际审查模型。真实 DeepSeek 放行、拒绝和文件调查续接已通过；GLM 两条路径因原生账号凭据未解析成功停在准备阶段，本轮未验证原拦截是否解除。详见[验收报告](docs/desktop-acceptance.md)。
 
@@ -16,7 +16,11 @@
 
 ### 1. 下载并启动适配桌面
 
-使用本地 `artifacts/0.1.3/CodexAutoApproval-Windows-0.1.3.zip`，解压后直接双击其中的 **ZCode.exe**。本机已部署的修复版入口为 `artifacts/0.1.3/CodexAutoApproval-Windows/ZCode.exe`；原开始菜单入口已指向这个目录。其他机器需按[源码构建说明](host-adapter/README.md)生成产物。
+从 [0.2.0 Release](https://github.com/MagicSpirit007/CodexAutoApprovalZcode/releases/tag/autoreview-v0.2.0) 下载独立 NSIS 安装器 `ZCodeAutoReview-0.2.0-win-x64.exe`，默认安装到 `D:\CodexAutoReview\zcode\runtime\ZCodeAutoReview`。始终使用 **ZCode AutoReview** 快捷方式；后续启动检查本项目正式适配版，下载与重启安装分别手动确认。首次安装后可用迁移脚本重定向旧适配快捷方式，沿用历史会话、已安装插件和审查模型设置。发布、校验与回退流程见[独立安装及稳定升级说明](docs/distribution-upgrades.md)。
+
+下面的 0.1.3 便携目录保留为历史回退材料；该入口不会自行迁移到新安装方式。
+
+旧便携版为本地 `artifacts/0.1.3/CodexAutoApproval-Windows-0.1.3.zip`，原入口为 `artifacts/0.1.3/CodexAutoApproval-Windows/ZCode.exe`，保留作回退材料。本机迁移后，原快捷方式已指向固定安装目录中的 **ZCodeAutoReview.exe**。
 
 适配桌面使用独立应用身份 `ZCode AutoReview`，可以与原版并存。已有旧适配版运行时，先退出旧版再启动新版；无需 `.cmd` 启动包装。按 ZCode 正常流程配置模型，并打开本地工作区。
 

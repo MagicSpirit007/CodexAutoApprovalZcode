@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "distributionVersion": "0.2.0",
+  "upstreamVersion": "3.14.3",
+  "upstreamCommit": "29628c9acdb81b703bbd4080c207a0e7ce5e276e",
+  "artifactSha256": "8fe1160c3d2c28a0fddc4bd528f927b88d2cfbabf8fb83c75751b0e13525cef6",
+  "artifactSize": 167040634,
+  "patchSha256": "92e9d6d3b2ea48ceaec7ce57d0446e91bef5310783c652b4a138d998ec842b6a",
+  "agentSha256": "637cdf60127a390f4232300756f0498a2c018416ce28cb7fb8d60fdff48961ef",
+  "asarSha256": "df9dec1c7ba2dfd69ee509704dd43c2c54ecf0943b7b2207acfc530734c3307e",
+  "sourceReplay": "passed",
+  "typecheck": "passed",
+  "lint": "passed",
+  "architecture": "passed",
+  "regressions": "passed",
+  "windowsUpgrade": "passed",
+  "dataRetention": "passed",
+  "rollback": "passed",
+  "regressionCounts": {
+    "updates": {
+      "passed": 29,
+      "skipped": 0
+    },
+    "core-regressions": {
+      "passed": 56,
+      "skipped": 0
+    },
+    "host-regressions": {
+      "passed": 64,
+      "skipped": 1
+    },
+    "responses-regressions": {
+      "passed": 16,
+      "skipped": 0
+    },
+    "ui-regressions": {
+      "passed": 2,
+      "skipped": 0
+    }
+  },
+  "packagedApprovalScenarios": 8,
+  "packagedResponsesScenarios": 4,
+  "localConfiguration": {
+    "passed": true,
+    "privateProfileRemoved": true,
+    "originalConfigurationUnchanged": true,
+    "reasoningLevel": "max",
+    "continuations": 1
+  },
+  "baselineExceptions": {
+    "cliLint": {
+      "existing": 85,
+      "new": 0
+    },
+    "desktopMainTypecheck": {
+      "existing": 87,
+      "new": 0
+    }
+  },
+  "windowsAcceptance": {
+    "testVersions": [
+      "0.2.0",
+      "0.2.1"
+    ],
+    "stages": [
+      {
+        "name": "first-install",
+        "passed": true
+      },
+      {
+        "name": "startup-confirmation-no-auto-download",
+        "passed": true
+      },
+      {
+        "name": "wrong-identity-refused",
+        "passed": true
+      },
+      {
+        "name": "incompatible-plugin-refused",
+        "passed": true
+      },
+      {
+        "name": "offline-keeps-version",
+        "passed": true
+      },
+      {
+        "name": "corrupt-installer-refused",
+        "passed": true
+      },
+      {
+        "name": "duplicate-download-single-owner",
+        "passed": true
+      },
+      {
+        "name": "custom-workspace-plugin-blocks-install",
+        "passed": true
+      },
+      {
+        "name": "cache-tamper-keeps-app",
+        "passed": true
+      },
+      {
+        "name": "running-task-blocks-install",
+        "passed": true
+      },
+      {
+        "name": "native-approval-and-history-created",
+        "passed": true
+      },
+      {
+        "name": "real-upgrade-fixed-shortcut",
+        "passed": true,
+        "installedVersion": "0.2.1",
+        "shortcutUnchanged": true
+      },
+      {
+        "name": "sessions-plugin-and-review-settings-retained",
+        "passed": true
+      },
+      {
+        "name": "manual-data-compatible-rollback",
+        "passed": true
+      },
+      {
+        "name": "cached-installer-repair",
+        "passed": true
+      }
+    ],
+    "isolated": true
+  },
+  "localInstallation": {
+    "distributionVersion": "0.2.0",
+    "upstreamVersion": "3.14.3",
+    "installed": true,
+    "defaultDirectory": true,
+    "oldPortableUnchanged": true,
+    "currentConfigurationUnchanged": true,
+    "migratedShortcutCount": 1,
+    "completedAt": "2026-10-03T02:35:38.627Z"
+  },
+  "dataSchemaChanged": false
+}

@@ -1,0 +1,1396 @@
+diff --git a/packages/desktop/electron-builder.config.js b/packages/desktop/electron-builder.config.js
+index 0456b7a..174ddc5 100644
+--- a/packages/desktop/electron-builder.config.js
++++ b/packages/desktop/electron-builder.config.js
+@@ -9,6 +9,7 @@ import { loadBuiltinProviderConfig } from "../../scripts/builtin-provider-config
+ import { noticesFileName, stageElectronNotices } from "../../scripts/third-party-notices.mjs";
+ import { resolveNativeSearchReleasePlan } from "../../scripts/native-search-tools-config.mjs";
+ import { getBuildMetadata } from "./scripts/build-metadata.mjs";
++import { readAutoReviewRelease } from "./scripts/auto-review-release.mjs";
+ import { collectRuntimeModuleClosureEntries } from "./scripts/runtime-dependency-closure.mjs";
+ import {
+   resolvePackagedNodePtyPrebuildPath,
+@@ -69,6 +70,7 @@ import {
+ } from "./scripts/patch-nsis-install-section.mjs";
+ 
+ const buildMetadata = getBuildMetadata();
++const autoReviewRelease = readAutoReviewRelease();
+ const targetPlatform = getTargetPlatform();
+ const builtinProviderConfig = await loadBuiltinProviderConfig();
+ const desktopProductIdentity = resolveDesktopProductIdentity({
+@@ -457,7 +459,9 @@ export default {
+   // Linux deb 打包（fpm）会校验 package metadata 中的 homepage、author.email、maintainer。
+   // CI 环境下若这些字段缺失会在产物阶段直接失败。这里统一在构建配置补齐，避免依赖外部注入。
+   extraMetadata: {
+-    version: buildMetadata.appVersion,
++    version: autoReviewRelease?.distributionVersion ?? buildMetadata.appVersion,
++    ...(autoReviewRelease ? { zcodeAutoReview: autoReviewRelease } : {}),
++    ...(autoReviewRelease ? { name: "zcode-autoreview" } : {}),
+     zcodeProductFlavor: desktopProductIdentity.flavor,
+     homepage: "https://zcode.z.ai",
+     author: {
+@@ -691,8 +695,10 @@ export default {
+     ],
+   },
+   win: {
++    ...(autoReviewRelease ? { executableName: autoReviewRelease.executableName,
++      artifactName: `${autoReviewRelease.executableName}-\${version}-win-x64.exe` } : {}),
+     target: ["nsis"],
+-    artifactName: buildDesktopArtifactName("win"),
++    ...(!autoReviewRelease ? { artifactName: buildDesktopArtifactName("win") } : {}),
+   },
+   linux: {
+     target: ["AppImage", "deb", "rpm", "pacman"],
+@@ -748,6 +754,8 @@ export default {
+     ],
+   },
+   nsis: {
++    ...(autoReviewRelease ? { include: "build/autoreview-installer.nsh", shortcutName: autoReviewRelease.productName,
++      uninstallDisplayName: autoReviewRelease.productName, deleteAppDataOnUninstall: false } : {}),
+     oneClick: false,
+     allowToChangeInstallationDirectory: true,
+     // Windows 安装流程使用独立安装图标，和应用运行时图标解耦。
+@@ -764,6 +772,6 @@ export default {
+     useMultipleRangeRequest: false,
+     // 新客户端运行时使用服务端 manifest provider；这里仅保留 electron-builder 必需的
+     // generic publish 占位，避免打包产物继续携带可配置的旧 stable feed。
+-    url: "http://localhost:8081",
++    url: autoReviewRelease?.updateFeedUrl ?? "http://localhost:8081",
+   },
+ };
+diff --git a/packages/desktop/scripts/build-metadata.mjs b/packages/desktop/scripts/build-metadata.mjs
+index ee1ca62..731c84f 100644
+--- a/packages/desktop/scripts/build-metadata.mjs
++++ b/packages/desktop/scripts/build-metadata.mjs
+@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+ import { createRequire } from "node:module";
+ import { resolve } from "node:path";
+ import { fileURLToPath } from "node:url";
++import { readAutoReviewRelease } from "./auto-review-release.mjs";
+ 
+ const require = createRequire(import.meta.url);
+ const moduleDir = import.meta.dirname;
+@@ -82,9 +83,14 @@ function resolveCommitId() {
+ export function collectBuildMetadata() {
+   const rootPackageJson = readJson(resolve(workspaceDir, "package.json"));
+   const desktopPackageJson = readJson(resolve(desktopDir, "package.json"));
++  const autoReview = readAutoReviewRelease();
++  if (autoReview && rootPackageJson.version !== autoReview.upstreamVersion) {
++    throw new Error("AutoReview source package version does not match pinned upstream version");
++  }
+ 
+   return {
+     appVersion: normalizeVersion(rootPackageJson.version),
++    ...(autoReview ? { distributionVersion: autoReview.distributionVersion, autoReview } : {}),
+     buildCommitId: resolveCommitId(),
+     buildTime: new Date().toISOString(),
+     electronBuilderVersion: resolveInstalledPackageVersion(
+diff --git a/packages/desktop/scripts/desktop-product-identity.mjs b/packages/desktop/scripts/desktop-product-identity.mjs
+index 3f3f5d9..ad1a9d4 100644
+--- a/packages/desktop/scripts/desktop-product-identity.mjs
++++ b/packages/desktop/scripts/desktop-product-identity.mjs
+@@ -3,6 +3,8 @@
+  * 典型用法是 `ZCODE_ENV=production ZCODE_PREVIEW_IDENTITY=1`，得到一个连接生产后端、
+  * 可与正式版并排安装的 `ZCode Preview`。
+  */
++import { readAutoReviewRelease } from "./auto-review-release.mjs";
++
+ export const ZCODE_PREVIEW_IDENTITY_ENV = "ZCODE_PREVIEW_IDENTITY";
+ 
+ const PRODUCTION_IDENTITY = Object.freeze({
+@@ -64,6 +66,9 @@ export function resolveDesktopProductFlavor(env = process.env) {
+ }
+ 
+ export function resolveDesktopProductIdentity(env = process.env) {
++  const autoReview = readAutoReviewRelease(env);
++  if (autoReview) return { ...PRODUCTION_IDENTITY, appId: autoReview.applicationId,
++    productName: autoReview.productName, cuaHelperInstallVariant: "autoreview" };
+   return desktopProductIdentities[resolveDesktopProductFlavor(env)];
+ }
+ 
+diff --git a/packages/desktop/src/main/about.ts b/packages/desktop/src/main/about.ts
+index 8553c5f..3bcef81 100644
+--- a/packages/desktop/src/main/about.ts
++++ b/packages/desktop/src/main/about.ts
+@@ -11,6 +11,7 @@ import {
+   ZCODE_VERSION,
+ } from "@zcode/shared";
+ import { createCustomAboutDialogHtml } from "./aboutWindow.js";
++import { autoReviewRelease } from "./autoReviewRelease.js";
+ 
+ interface DesktopBuildMetadata {
+   appVersion?: string;
+@@ -255,11 +256,14 @@ export async function showAboutDialog(
+   void aboutWindow.loadURL(
+     `data:text/html;charset=utf-8,${encodeURIComponent(
+       createCustomAboutDialogHtml({
+-        applicationName: ABOUT_APPLICATION_NAME,
++        applicationName: autoReviewRelease?.productName ?? ABOUT_APPLICATION_NAME,
+         appVersion: snapshot.appVersion,
+         copyright: formatAboutCopyright(undefined, locale),
+-        optimizationLine: formatAboutOptimizationLine(snapshot, locale),
+-        versionLabel: aboutMessages.versionLabel,
++        optimizationLine: autoReviewRelease
++          ? `${locale === "zh-CN" ? "基于 ZCode" : "Based on ZCode"} ${autoReviewRelease.upstreamVersion}`
++          : formatAboutOptimizationLine(snapshot, locale),
++        versionLabel: autoReviewRelease
++          ? (locale === "zh-CN" ? "适配发行版本" : "Adapted release") : aboutMessages.versionLabel,
+         okButtonLabel: aboutMessages.okButtonLabel,
+       }),
+     )}`,
+diff --git a/packages/desktop/src/main/autoUpdater.ts b/packages/desktop/src/main/autoUpdater.ts
+index f7b8078..c8ed777 100644
+--- a/packages/desktop/src/main/autoUpdater.ts
++++ b/packages/desktop/src/main/autoUpdater.ts
+@@ -20,6 +20,8 @@ import pkg, { CancellationToken } from "electron-updater";
+ import semver from "semver";
+ import { logger } from "./logger.js";
+ import { getElectronReleasePlatform, ManifestUpdateProvider } from "./manifestUpdateProvider.js";
++import { autoReviewRelease, autoReviewTestBuild } from "./autoReviewRelease.js";
++import { ActiveAutoReviewUpdateProvider, revalidateAutoReviewUpdate, autoReviewUpdateCompatiblePluginVersions } from "./autoReviewUpdateProvider.js";
+ const { autoUpdater } = pkg;
+ 
+ export const CHECK_FOR_UPDATE_MENU_ID = "check-for-update";
+@@ -31,6 +33,7 @@ const DEV_AUTO_UPDATE_SWITCH = "--zcode-auto-update-dev";
+ const DEV_AUTO_UPDATE_VERSION_ENV = "ZCODE_AUTO_UPDATE_DEV_VERSION";
+ const DEV_AUTO_UPDATE_VERSION_SWITCH = "--zcode-auto-update-dev-version";
+ let readyUpdateVersion: string | null = null;
++let readyAutoReviewInstallerFile: string | null = null;
+ let readyUpdateReleaseNotes: PostUpdateReleaseNotesPayload | null = null;
+ let readyUpdateRestoredFromPendingReleaseNotes = false;
+ let menuLocale: Locale = DEFAULT_LOCALE;
+@@ -51,7 +54,7 @@ let downloadingUpdateChannel: ElectronReleaseChannel | null = null;
+ let downloadCancellationToken: CancellationToken | null = null;
+ let readyUpdateChannel: ElectronReleaseChannel | null = null;
+ let pendingManifestReleaseChannelRefresh: ElectronReleaseChannel | null = null;
+-let onBeforeQuitAndInstall: (() => void | Promise<void>) | undefined;
++let onBeforeQuitAndInstall: ((compatiblePluginVersions?: string[]) => void | Promise<void>) | undefined;
+ const acknowledgedPostUpdateReleaseNotesVersions = new Set<string>();
+ const cancelledDownloadTokens = new WeakSet<CancellationToken>();
+ let pendingCancelledDownloadErrorCount = 0;
+@@ -69,6 +72,7 @@ type ReleaseNoteInfoLike = {
+ };
+ 
+ type UpdateDownloadedInfoLike = {
++  downloadedFile?: string;
+   version: string;
+   path?: string | null;
+   files?: Array<{ url?: string | null } | null> | null;
+@@ -110,7 +114,7 @@ let forceAutoUpdateLastLoggedProgressBucket: number | null = null;
+ 
+ interface InitAutoUpdaterOptions {
+   enabled?: boolean;
+-  onBeforeQuitAndInstall?: () => void | Promise<void>;
++  onBeforeQuitAndInstall?: (compatiblePluginVersions?: string[]) => void | Promise<void>;
+   settingService?: SettingServiceLike;
+   locale?: Locale;
+   updateFeedSource?: RuntimeUpdateFeedSource;
+@@ -437,11 +441,15 @@ async function quitAndInstallUpdate(rejectUnavailable = false) {
+   // 表现成点击更新后界面消失但进程没退、安装流程也不再继续。
+   // 这里先通知主进程进入“允许真正关窗”的状态，再把控制权交给 updater。
+   try {
++    if (autoReviewRelease) {
++      if (!readyAutoReviewInstallerFile) throw new Error("Validated update installer is unavailable; check and download again");
++      await revalidateAutoReviewUpdate(readyUpdateVersion, readyAutoReviewInstallerFile);
++    }
+     // Windows 更新会替换 resources/glm 等随包资源；
+     // 若 quitAndInstall 先于 host/agent 子进程完成退出，安装器可能在文件仍被占用时开始覆盖，
+     // 最终留下“应用能启动但 bundled agent 丢失”的半更新状态。
+     // 这里显式等待主进程完成退出准备，再进入安装器，尽量把资源替换和子进程回收时序拉直。
+-    await onBeforeQuitAndInstall?.();
++    await onBeforeQuitAndInstall?.(autoReviewRelease ? autoReviewUpdateCompatiblePluginVersions(readyUpdateVersion) : undefined);
+   } catch (error) {
+     // 安装前退出准备是释放 host/agent 与 resources/glm 文件锁的硬前置条件。
+     // 如果这里失败后仍启动安装器，Windows 可能在资源仍被占用时覆盖安装目录，形成半更新。
+@@ -467,7 +475,7 @@ async function quitAndInstallUpdate(rejectUnavailable = false) {
+     // 3.3.0 的 Windows 自定义 PowerShell delayed launcher 在 detached/hidden
+     // 模式下可能只创建 powershell.exe，却没有稳定执行到安装器启动，用户看到应用关闭但版本不变。
+     // 这里恢复 electron-updater 原生安装入口，避免把“launcher 进程创建成功”误当成更新已接管。
+-    autoUpdater.quitAndInstall();
++    autoUpdater.quitAndInstall(Boolean(autoReviewRelease), Boolean(autoReviewRelease));
+   } finally {
+     quitAndInstallInFlight = false;
+   }
+@@ -717,6 +725,7 @@ export function resolveUpdateFeedSourceFromStartupConfig(
+ async function resolveUpdateReleaseChannel(
+   settingService: SettingServiceLike | undefined,
+ ): Promise<ElectronReleaseChannel> {
++  if (autoReviewRelease) return "stable";
+   if (!settingService) {
+     return "stable";
+   }
+@@ -752,6 +761,15 @@ async function syncAutoUpdateCheckChannelFromSettings(
+ }
+ 
+ function applyManifestUpdateProvider(options: InitAutoUpdaterOptions): void {
++  if (autoReviewRelease) {
++    autoUpdater.allowDowngrade = false;
++    autoUpdater.allowPrerelease = false;
++    autoUpdater.disableDifferentialDownload = true;
++    autoUpdater.setFeedURL({ provider: "custom", updateProvider: ActiveAutoReviewUpdateProvider,
++      url: autoReviewTestBuild ? (process.env.ZCODE_AUTOREVIEW_TEST_FEED_URL || autoReviewRelease.updateFeedUrl)
++        : autoReviewRelease.updateFeedUrl } as Parameters<typeof autoUpdater.setFeedURL>[0]);
++    return;
++  }
+   const manifestUrl = options.updateFeedSource?.url.trim();
+   autoUpdater.setFeedURL({
+     provider: "custom",
+@@ -927,6 +945,7 @@ function clearDownloadingUpdateState() {
+ }
+ 
+ function clearReadyUpdateState() {
++  readyAutoReviewInstallerFile = null;
+   readyUpdateVersion = null;
+   readyUpdateReleaseNotes = null;
+   readyUpdateChannel = null;
+@@ -1080,6 +1099,7 @@ async function isSkippedUpdateVersion(
+ async function shouldAutoDownloadAndInstallUpdates(
+   settingService: SettingServiceLike | undefined,
+ ): Promise<boolean> {
++  if (autoReviewRelease) return false;
+   if (!settingService) {
+     return false;
+   }
+@@ -1222,8 +1242,11 @@ function downloadAvailableUpdate(reason = "renderer") {
+ 
+   const cancellationToken = new CancellationToken();
+   downloadCancellationToken = cancellationToken;
+-  void autoUpdater
+-    .downloadUpdate(cancellationToken)
++  void (async () => {
++    if (autoReviewRelease) await revalidateAutoReviewUpdate(downloadingUpdateVersion!);
++    if (cancellationToken.cancelled) return;
++    return autoUpdater.downloadUpdate(cancellationToken);
++  })()
+     .catch((error) => {
+       if (isCancelledDownload(cancellationToken, error)) {
+         logger.info(`[auto-update] ${reason} download cancelled`);
+@@ -1502,7 +1525,7 @@ export async function initAutoUpdater(options: InitAutoUpdaterOptions = {}): Pro
+   // Windows/NSIS 在窗口关闭后会异步启动安装；如果用户紧接着关机，安装器可能被系统中断，
+   // 留下半更新状态并导致下次启动失败。
+   // 这里仅在 Windows 关闭“退出即自动安装”，要求用户显式点更新；其他平台保持原有行为，避免改动既有升级链路。
+-  autoUpdater.autoInstallOnAppQuit = process.platform !== "win32";
++  autoUpdater.autoInstallOnAppQuit = !autoReviewRelease && process.platform !== "win32";
+   autoUpdater.logger = logger;
+   applyManifestUpdateProvider(options);
+ 
+@@ -1594,7 +1617,7 @@ export async function initAutoUpdater(options: InitAutoUpdaterOptions = {}): Pro
+         buildUpdateAvailableState(info.version, availableUpdateReleaseNotes, channel),
+       );
+ 
+-      if (activeForceAutoUpdateListener) {
++      if (activeForceAutoUpdateListener && !autoReviewRelease) {
+         downloadAvailableUpdate("force-update");
+         return;
+       }
+@@ -1676,6 +1699,7 @@ export async function initAutoUpdater(options: InitAutoUpdaterOptions = {}): Pro
+   });
+ 
+   autoUpdater.on("update-downloaded", (info: UpdateDownloadedInfoLike) => {
++    readyAutoReviewInstallerFile = info.downloadedFile ?? null;
+     readyUpdateVersion = info.version;
+     readyUpdateRestoredFromPendingReleaseNotes = false;
+     readyUpdateChannel = downloadingUpdateChannel ?? availableUpdateChannel;
+@@ -1689,7 +1713,7 @@ export async function initAutoUpdater(options: InitAutoUpdaterOptions = {}): Pro
+     setAutoUpdaterMenuState(buildUpdateDownloadedState(info.version));
+     notifyForceAutoUpdate({ kind: "ready", version: info.version });
+ 
+-    if (activeForceAutoUpdateListener) {
++    if (activeForceAutoUpdateListener && !autoReviewRelease) {
+       notifyForceAutoUpdate({ kind: "installing" });
+       void quitAndInstallUpdate();
+     }
+@@ -1755,6 +1779,8 @@ export async function initAutoUpdater(options: InitAutoUpdaterOptions = {}): Pro
+ 
+   triggerCheckForUpdates("startup");
+ 
++  if (autoReviewRelease) return;
++
+   autoUpdatePollTimer = setInterval(() => {
+     triggerCheckForUpdates("poll");
+   }, AUTO_UPDATE_POLL_INTERVAL_MS);
+@@ -1777,6 +1803,13 @@ export function requestForceAutoUpdate(
+   logger.info(`[force-update] 自动升级开始 reason=${reason}`);
+   onStateChange({ kind: "checking" });
+ 
++  if (autoReviewRelease) {
++    activeForceAutoUpdateListener = null;
++    onStateChange({ kind: "error", message: "ZCode AutoReview updates require confirmation in Check for Updates" });
++    void autoUpdater.checkForUpdates().catch((error) => handleAutoUpdateFailure(error, "manual check failed"));
++    return dispose;
++  }
++
+   if (!canUseAutoUpdaterInCurrentRuntime()) {
+     const message = "not packaged";
+     logger.info(`[force-update] 自动升级跳过：${message}`);
+diff --git a/packages/desktop/src/main/desktopHostProcess.ts b/packages/desktop/src/main/desktopHostProcess.ts
+index 72bf5d6..ff41106 100644
+--- a/packages/desktop/src/main/desktopHostProcess.ts
++++ b/packages/desktop/src/main/desktopHostProcess.ts
+@@ -100,6 +100,9 @@ interface SpawnHostProcessOptions {
+ }
+ 
+ const exitedHostProcesses = new WeakSet<ElectronUtilityProcess>();
++export function hasHostProcessExited(child: ElectronUtilityProcess): boolean {
++  return exitedHostProcesses.has(child);
++}
+ const disposingHostProcesses = new Set<ElectronUtilityProcess>();
+ 
+ export function listDisposingHostProcesses(): ElectronUtilityProcess[] {
+diff --git a/packages/desktop/src/main/desktopRuntimeEnv.ts b/packages/desktop/src/main/desktopRuntimeEnv.ts
+index e444d70..0019878 100644
+--- a/packages/desktop/src/main/desktopRuntimeEnv.ts
++++ b/packages/desktop/src/main/desktopRuntimeEnv.ts
+@@ -1,5 +1,6 @@
+ /* eslint-disable max-lines -- desktop runtime/env 解析需要集中维护 main/host/remote assets 的启动边界，拆分会扩大远程连接回归面。 */
+ import { existsSync, readFileSync } from "node:fs";
++import { autoReviewRelease } from "./autoReviewRelease.js";
+ import { homedir } from "node:os";
+ import { join, resolve, win32 } from "node:path";
+ import type { ConnectOptions } from "@zcode/server/remote";
+@@ -57,10 +58,14 @@ function isTruthyRuntimeEnvOverride(name: string): boolean {
+ 
+ // e2e 运行的是生产构建，默认会和本机正式版 ZCode 共用 app name / userData，
+ // 触发 Electron 单实例锁后只激活已有窗口，Chromedriver 无法接管测试进程。
+-// 这里允许测试显式隔离运行时身份，正常桌面/远控路径保持原来的默认值。
++// 适配发行默认使用既有的独立身份，直接运行 exe 也不会命中原版单实例锁；测试仍可显式覆盖。
+ export const runtimeApplicationName =
+   readRuntimeEnvOverride("ZCODE_DESKTOP_APPLICATION_NAME") ??
+-  (isLocalDevelopmentRuntime ? "ZCode Dev" : isPreviewPackagedRuntime ? "ZCode Preview" : "ZCode");
++  (isLocalDevelopmentRuntime
++    ? "ZCode Dev"
++    : isPreviewPackagedRuntime
++      ? "ZCode Preview"
++      : autoReviewRelease?.productName ?? "ZCode AutoReview");
+ // Electron 的 app.getPath("home") 不一定跟随测试进程里的 HOME 覆盖。
+ // e2e 默认工作区依赖 home 路径，因此提供显式覆盖，避免测试写到开发者真实 ~/ZCodeProject。
+ export const runtimeHomePath = readRuntimeEnvOverride("ZCODE_DESKTOP_HOME_DIR");
+@@ -547,7 +552,8 @@ export function buildHostProcessEnv(hostProcessLocalEnv: Record<string, string>)
+     ZCODE_ENV,
+     // Preview 与生产版共享任务、配置和凭据，但不同版本的 Helper 不能互相覆盖或触发降级保护。
+     // 只隔离 computer-use 下的运行组件，不改写 ZCODE_HOME / ZCODE_DATA_BASE_DIR 业务数据根。
+-    ...(isPreviewPackagedRuntime ? { ZCODE_CUA_HELPER_INSTALL_VARIANT: "preview" } : {}),
++    ...(autoReviewRelease ? { ZCODE_CUA_HELPER_INSTALL_VARIANT: "autoreview" }
++      : isPreviewPackagedRuntime ? { ZCODE_CUA_HELPER_INSTALL_VARIANT: "preview" } : {}),
+     // Dynamic Workflow 灰度的本地覆盖：Main 决策后写入，production 包为空对象（继承值已在上面删除）。
+     ...dynamicWorkflowModeHostEnv,
+     // 模型请求默认 header 由 agent 进程构造，过去只继承 shell env 导致桌面启动时拿不到 app 版本。
+diff --git a/packages/desktop/src/main/index.ts b/packages/desktop/src/main/index.ts
+index c856324..b77c502 100644
+--- a/packages/desktop/src/main/index.ts
++++ b/packages/desktop/src/main/index.ts
+@@ -130,6 +130,9 @@ import {
+ } from "./desktopApplicationMenu.js";
+ import { applyAppIcon } from "./desktopWindowChrome.js";
+ import { resolveWindowsAppUserModelIdForFlavor } from "../../scripts/desktop-product-identity.mjs";
++import { autoReviewRelease } from "./autoReviewRelease.js";
++import { prepareAutoReviewHosts } from "./autoReviewInstallPreparation.js";
++import { hasHostProcessExited } from "./desktopHostProcess.js";
+ import type { DesktopWindowSize } from "./desktopWindowSize.js";
+ import { maybeWarnArchitectureMismatch } from "./desktopArchitectureGuard.js";
+ import { maybeBlockStartupForForceUpdate } from "./forceUpdateGuard.js";
+@@ -614,6 +617,7 @@ const forceQuitRef = { current: false };
+ const explicitQuitRef = { current: false };
+ let appQuitPreparationInFlight: Promise<void> | null = null;
+ let hasPreparedAppQuit = false;
++let autoReviewInstallPreparing = false;
+ const windowWorkspaceMap = new Map<number, Set<string>>();
+ const windowTaskRealtimeHostIdMap = new Map<number, string>();
+ const windowUnreadCountMap = new Map<number, number>();
+@@ -655,6 +659,7 @@ function wakeOffPeakScheduler(offPeakTaskId?: string): void {
+ }
+ // 选一个本地 host 执行派发：本期本地 workspace 由任一本地窗口 host 的 createTask 按 path 拉起/复用 agent。
+ function resolveCronDispatchHost(): ElectronUtilityProcess | null {
++  if (autoReviewInstallPreparing) return null;
+   const first = windowHostProcessMap.values().next();
+   return first.done ? null : first.value;
+ }
+@@ -978,11 +983,12 @@ function syncImmediateAppSettings(patch: Partial<AppSettings>) {
+ async function getAutoUpdatePreferences() {
+   const settings = await mainSettingService.get();
+   return {
+-    autoDownloadAndInstallUpdates: settings.autoDownloadAndInstallUpdates ?? false,
++    autoDownloadAndInstallUpdates: autoReviewRelease ? false : settings.autoDownloadAndInstallUpdates ?? false,
+   };
+ }
+ 
+ async function setAutoDownloadAndInstallUpdates(enabled: boolean) {
++  if (autoReviewRelease) return;
+   await mainSettingService.update({
+     autoDownloadAndInstallUpdates: enabled,
+   });
+@@ -1276,6 +1282,9 @@ async function prepareWindowsProcessesForUpdateInstall() {
+   for (const error of cleanup.errors) {
+     logger.warn(`[auto-update] Windows process cleanup degraded: ${error}`);
+   }
++  if (autoReviewRelease && (cleanup.errors.length > 0 || cleanup.remainingLockProcesses.length > 0)) {
++    throw new Error("Update resources could not be released; current installation has been preserved");
++  }
+ 
+   if (cleanup.terminationPids.length === 0) {
+     logWindowsPackagedResourceWritableProbe("no-lock-processes");
+@@ -1978,7 +1987,7 @@ app.whenReady().then(async () => {
+     // 打包态必须与 NSIS 快捷方式使用同一 AUMID，否则 Shell 把它们当成不同应用。
+     // 使用构建期产品身份，不依赖用户机器环境；开发态继续保持独立身份。
+     app.setAppUserModelId(
+-      resolveWindowsAppUserModelIdForFlavor(ZCODE_PRODUCT_FLAVOR, { isPackaged: app.isPackaged }),
++      autoReviewRelease?.applicationId ?? resolveWindowsAppUserModelIdForFlavor(ZCODE_PRODUCT_FLAVOR, { isPackaged: app.isPackaged }),
+     );
+   }
+ 
+@@ -2014,12 +2023,36 @@ app.whenReady().then(async () => {
+   // 不向 Preview 渠道提供更新。
+   void initAutoUpdater({
+     enabled: ZCODE_PRODUCT_FLAVOR === "production",
+-    onBeforeQuitAndInstall: async () => {
++    onBeforeQuitAndInstall: async (compatiblePluginVersions) => {
++      let releaseHosts: (() => void) | undefined;
++      const hosts = [...new Set([...windowHostProcessMap.values(), ...listDisposingHostProcesses()])];
++      if (autoReviewRelease) {
++        autoReviewInstallPreparing = true;
++        try {
++          releaseHosts = await prepareAutoReviewHosts(hosts, compatiblePluginVersions ?? []);
++          if ([...windowHostProcessMap.values()].some((host) => !hosts.includes(host)))
++            throw new Error("Workspace windows changed during preparation; retry the update");
++        } catch (error) {
++          releaseHosts?.();
++          autoReviewInstallPreparing = false;
++          throw error;
++        }
++      }
++      try {
+       notifyStabilityLifecycle("update_install");
+       await prepareAppQuit("auto-update quitAndInstall", "update-install");
++      if (autoReviewRelease && hosts.some((host) => !hasHostProcessExited(host)))
++        throw new Error("Workspace processes have not exited; installation was cancelled");
+       if (process.platform === "win32") {
+         await prepareWindowsProcessesForUpdateInstall();
+       }
++      } catch (error) {
++        releaseHosts?.();
++        autoReviewInstallPreparing = false;
++        forceQuitRef.current = false;
++        hasPreparedAppQuit = false;
++        throw error;
++      }
+     },
+     settingService: mainSettingService,
+     locale: currentApplicationLocale,
+@@ -2256,7 +2289,7 @@ app.whenReady().then(async () => {
+   // gate 照常生效，对真实用户零影响。
+   const skipForceUpdateForLocalDevRuntime = !app.isPackaged;
+   const forceUpdateGuardResult =
+-    ZCODE_PRODUCT_FLAVOR === "production" && !skipForceUpdateForLocalDevRuntime
++    !autoReviewRelease && ZCODE_PRODUCT_FLAVOR === "production" && !skipForceUpdateForLocalDevRuntime
+       ? await maybeBlockStartupForForceUpdate({
+           locale: currentApplicationLocale,
+           logger,
+diff --git a/packages/desktop/tsup.config.ts b/packages/desktop/tsup.config.ts
+index e418f5d..50e7f66 100644
+--- a/packages/desktop/tsup.config.ts
++++ b/packages/desktop/tsup.config.ts
+@@ -5,12 +5,14 @@ import { pathToFileURL } from "node:url";
+ import { defineConfig } from "tsup";
+ import { getBuildMetadata } from "./scripts/build-metadata.mjs";
+ import { resolveDesktopProductFlavor } from "./scripts/desktop-product-identity.mjs";
++import { readAutoReviewRelease } from "./scripts/auto-review-release.mjs";
+ // tsup 会先打包配置文件；动态加载构建工具，避免其 import.meta.dirname 被重定位到 desktop。
+ const { loadBuiltinProviderConfig } = await import(
+   pathToFileURL(resolve(import.meta.dirname, "../../scripts/builtin-provider-config.mjs")).href
+ );
+ 
+ const buildMetadata = getBuildMetadata();
++const autoReviewRelease = readAutoReviewRelease();
+ 
+ // 手动加载 .env 文件，tsup 不像 Vite 会自动读取 .env.*；这些文件只提供链接常量。
+ function loadEnvFiles(): Record<string, string> {
+@@ -102,6 +104,8 @@ function createSharedDefines() {
+     __ZCODE_ENV__: JSON.stringify(zcodeEnv),
+     __ZCODE_ENDPOINT_ENV__: JSON.stringify(pickProductEndpointEnv(env)),
+     __ZCODE_PRODUCT_FLAVOR__: JSON.stringify(zcodeProductFlavor),
++    __ZCODE_AUTOREVIEW_RELEASE__: JSON.stringify(autoReviewRelease),
++    __ZCODE_AUTOREVIEW_TEST_BUILD__: JSON.stringify(process.env.ZCODE_AUTOREVIEW_TEST_BUILD === "1"),
+     // Computer Use Helper build identity — helperInstaller 读它决定下载哪个 Helper bundle。
+     // 缺失时 installer 抛 "Packaged ZCode is missing its embedded Computer Use Helper build identity"。
+     // CI 构建时通过 ZCODE_CUA_HELPER_BUILD_ID env 注入；dev 为空串走兜底（dev helper 不走下载）。
+diff --git a/docs/specs/autoreview-distribution.md b/docs/specs/autoreview-distribution.md
+new file mode 100755
+index 0000000..a54986d
+--- /dev/null
++++ b/docs/specs/autoreview-distribution.md
+@@ -0,0 +1,113 @@
++# ZCode AutoReview stable Windows distribution
++
++Build environment: `ZCODE_AUTOREVIEW_RELEASE_FILE` selects the checked release
++configuration at compile time; absent means the upstream product. Invalid input
++stops the build. `ZCODE_AUTOREVIEW_TEST_BUILD=1` requires the separate acceptance
++appId/name and permits only a loopback `ZCODE_AUTOREVIEW_TEST_FEED_URL` at runtime.
++Production ignores that test URL. Neither variable changes native data paths.
++Official minimum-version/forced-update guards do not own adapted installation.
++The first release supports local workspaces; connected remote sessions refuse
++installation until disconnected. NSIS stores its installer outside the app folder
++for repair and manual data-compatible rollback.
++
++## Product and source
++
++The distribution is a Windows x64 NSIS application with application id
++`dev.codexautoreview.zcode`, product name `ZCode AutoReview` and executable
++`ZCodeAutoReview.exe`. NSIS install/uninstall registration, AUMID, helper identity,
++update cache and shortcuts must not target the official installation. The default
++install directory is `D:\CodexAutoReview\zcode\runtime\ZCodeAutoReview`.
++The existing `ZCode AutoReview` Electron userData and native `.zcode` settings,
++plugins, model credentials and session data remain at their current locations.
++Installer/update/uninstall never remove those data directories.
++
++`release.config.json` in the adapter repository is the build input. It is embedded
++at build time; inherited runtime environment cannot override production identity,
++version, repository or feed. Distribution version starts at 0.2.0 and drives
++app.getVersion(), installer metadata and update comparison. Upstream version and
++commit continue to drive native model/protocol attribution. About displays both.
++Desktop and Agent must be built from the same pinned stable source. A newer
++official binary without matching public source is not a new adapted version.
++
++## Update ownership and contract
++
++Desktop Main owns the existing update state machine. The adapted application
++uses only the dedicated `updates/windows-x64/stable/latest.yml` index; all manual,
++startup and forced-update paths retain that source. The index references immutable
++`autoreview-v<distributionVersion>` GitHub Release assets. Stable manifests require
++the application id, stable distribution/upstream versions, full source commit,
++patch SHA256, bridge protocol, tested plugin versions, and the installer's SHA512
++and size. Unknown identity, preview version, unsupported bridge, missing metadata,
++unapproved asset origin or an incompatible installed Codex plugin fail closed.
++An absent plugin does not prevent installing the desktop with native permissions.
++
++No automatic download, automatic install on quit, preview feed or automatic
++downgrade is allowed, including when shared native settings request them. Startup
++checks do not block first paint. A user chooses download and then restart/install.
++Offline or invalid manifests leave the application running and permit retry.
++The exact validated release is rechecked before download and install.
++Main passes the selected manifest's tested plugin versions through every Host
++prepare lease. Each CLI resolves native user/workspace storage roots and checks
++all installed Codex plugin versions, including disabled copies, while admission
++is frozen. A custom storage path cannot bypass the default-profile check.
++After the user confirms restart, adapted NSIS updates install silently into the
++registered directory and relaunch the application; first installation retains its
++interactive directory selection.
++
++## Installation admission
++
++Main acquires one request-scoped prepare lease from every live Host. Each Host
++blocks new task admission before checking authoritative local runtime and workflow
++activity, remote workspace activity and requests already being admitted. Renderer
++counts and delayed main-process projections cannot authorize installation.
++The same gate covers RPC prompts, automation/off-peak dispatch, bot and session
++message dispatch. A busy Host, missing acknowledgement, changed Host set or failed
++preparation rejects installation and releases every lease; no window is closed.
++After all Hosts acknowledge idle, Main awaits the existing process cleanup barrier
++and verifies that all owned Hosts/Agents have exited before invoking NSIS.
++
++```mermaid
++sequenceDiagram
++  participant U as User
++  participant M as Desktop Main updater
++  participant H as Window Host runtime owner
++  participant I as Independent NSIS installer
++  M->>M: Check adapted stable manifest without blocking UI
++  U->>M: Download selected validated release
++  M->>M: Verify installer SHA512
++  U->>M: Restart and update
++  M->>H: Prepare(requestId), freeze new admission
++  H-->>M: Idle lease or busy/failure
++  M->>H: Await existing shutdown and resource release
++  M->>I: Install into registered adapted directory
++  I->>M: Relaunch fixed executable
++```
++
++## Maintenance, migration and rollback
++
++Maintenance is manual: resolve a stable upstream ref to a full commit, replay the
++ordered contract/runtime/UI/distribution patches in a clean checkout, build with
++the source-pinned Node/pnpm/lockfile, and run the release gates. A conflict never
++changes the original development checkout. Upload versioned assets and receipts,
++verify download hashes, and promote the index last. Publishing is idempotent;
++existing release assets with different hashes cannot be replaced silently.
++
++First installation changes only shortcuts whose resolved target equals the old
++adapted executable. It preserves the old directory. Keep the previous validated
++installer/manifest outside the installation directory for manual repair/rollback.
++No database migration is introduced. A future upstream change requiring an
++incompatible migration blocks stable promotion until a separate data migration
++and rollback design is implemented. Never restore a shared data directory merely
++because an application update failed.
++
++## Acceptance
++
++Test real NSIS installation and update between two test distribution versions with
++one unchanged shortcut. Cover multiple windows, busy tasks, review, workflow,
++admission race, duplicate install, failed prepare, cancellation, offline, damaged
++package, invalid metadata, wrong identity, incompatible plugin, stable-only and
++rollback. User configuration/session fingerprints must survive migration. Existing
++allow/deny/ask, native modes/Plan, disable/uninstall, Chat Completions and Responses
++continuation must pass source and packaged regression. Full typecheck/lint and
++architecture checks run; new violations block promotion and existing baseline
++failures are reported honestly. Tests own only their isolated profiles/processes.
+diff --git a/docs/specs/codex-auto-approval.md b/docs/specs/codex-auto-approval.md
+new file mode 100755
+index 0000000..e8467e4
+--- /dev/null
++++ b/docs/specs/codex-auto-approval.md
+@@ -0,0 +1,462 @@
++# Codex automatic approval plugin bridge
++
++The local desktop installation is 3.14.4. This patch is based on source commit
++29628c9acdb81b703bbd4080c207a0e7ce5e276e (3.14.3). The independent desktop
++distribution retains the installed Electron executable and native assets, and
++replaces the Agent and desktop JavaScript with source-built bundles. This mixed patch-level compatibility must be
++tested and identified in the artifact metadata.
++
++## Ownership and flow
++
++```mermaid
++sequenceDiagram
++  participant R as Session runtime
++  participant H as Configured permission hook
++  participant P as Plugin process
++  participant M as Native model adapter
++  R->>H: PermissionRequest with exact tool input
++  H->>R: Obtain approval lease and authoritative context
++  H->>P: stdin + event-scoped bridge socket/token
++  P->>H: context/read
++  P->>H: model/complete with reviewer messages and read tool schemas
++  H->>M: Host-bound review model, credentials remain in host
++  M-->>P: Normalized text/tool calls
++  P-->>H: allow / deny / ask + assessment
++  H->>R: Validate lease, update per-turn denial state
++  R->>R: Execute once, return denial feedback, or prompt human
++```
++
++The runtime owns authoritative human input, session rejection action history, and per-turn counters.
++The configured hook owns its transient lease; the execution adapter owns socket
++I/O. A bridge exists only for the enabled `codex-auto-approval` plugin's foreground
++PermissionRequest process. The host resolves the configured review model; the plugin
++cannot choose it through request parameters or retrieve credentials. No shell or
++execution capability is exposed. Standard permission checking runs
++before and after hooks; hard denies and plan restrictions retain precedence.
++
++## Contract
++
++Bridge version 2 uses bounded NDJSON requests `{ id, token, method, params }` and
++responses `{ id, result }` or `{ id, error: { code, message, retryable,
++businessCode?, httpStatus?, requestId?, retryAfterMs? } }`.
++`context/read` returns binding, complete action, main and actual review selections, trusted
++human input records, limited visible evidence, previous denials, and deadline.
++`model/complete` accepts reviewer messages and the fixed `read_file/list_files`
++schemas and returns the existing Reviewer completion shape. Native model
++credentials are not returned. Every request is checked against the active lease.
++
++`ZCODE_APPROVAL_BRIDGE_SOCKET` and `ZCODE_APPROVAL_BRIDGE_TOKEN` are ephemeral
++child-process environment overlays. They are minted by the adapter, never
++accepted from inherited environment or project configuration, and never persisted
++or sent to the model. Windows uses named pipes; other platforms use private Unix
++sockets. `ZCODE_APPROVAL_BRIDGE_VERSION=2` advertises this contract. Missing bridge,
++invalid input, missing authoritative context, and transport failures request
++human approval, never allow.
++
++PermissionRequest gains `behavior: ask` and optional `assessment` and `bindingId`
++fields. Ask dominates automatic allow; deny dominates ask. A deny with
++`interrupt: true` stops the turn after delivering the denial tool result.
++Only a validated Codex plugin result contributes to per-turn counters.
++
++Cancellation ends the lease and native model request. Model selection, workspace,
++branch or human authorization changes invalidate the result. Stale results ask
++for a new review. An allow grants only the current unchanged tool call and never
++updates permission rules. On turn change denial counters reset; rejected actions remain in history. Policy
++denials trip at 3 consecutive or 10 among the last 50 reviews; technical errors
++are not policy denials. Plugin toggles take effect in new sessions.
++
++## Acceptance
++
++The assessment schema is shared in the contracts hook module. Permission error
++assembly owns the optional breaker turn-control result, so the permission flow
++does not duplicate error envelopes or exceed the existing module size boundary.
++
++The approval sidecar uses `ModelRetryBudget.SingleAttempt` for each native completion.
++The shared reviewer owns the outer three-attempt budget, including snapshot restarts;
++the adapter also counts initial attempts by request id. This prevents the native default
++eleven-attempt retry policy from multiplying the approval budget. Native authentication
++and runtime header refresh remain in the host.
++
++The reviewer supplies an explicit per-request output budget: at most 8192 tokens,
++clamped to the current native model's advertised maximum. Native ModelFactory
++deliberately binds only the selected reasoning level; omitting an output budget
++fails before transport. Review must preserve that bound reasoning level. Tests
++use the real native Model request validator, not only a permissive model mock.
++
++Cover real hook subprocess allow/deny/ask/cancel, malformed responses, wrong-token
++and stale leases, parallel sessions, model switching with inherited options,
++read-only investigation, policy feedback, turn-scoped breaker, hard permission
++rules, offline artifact installation, disable/uninstall and desktop startup.
++Keep the original independent CLI and its 52 tests compatible. Record actual
++checks and unverified remote-workspace support without claiming complete Codex
++equivalence. No database migration, public publication or global auth change.
++
++## CodexAutoApproval permission entry
++
++The local Windows permission menu adds a fourth radio option named exactly
++`CodexAutoApproval`; the marketplace listing has the same display name. The
++stable lowercase technical plugin id remains
++`codex-auto-approval@codex-auto-review-local` for upgrade compatibility.
++No new Agent permission enum or unimplemented `auto` mode is introduced.
++The regular Chinese subtitle is exactly `由Codex迁移的自动审批`.
++The existing new-session-required message takes precedence while enabling is blocked.
++
++The native plugin configuration owns enabled state. The existing plugin service
++and plugin management store own mutations and projection; the composer owns
++only its native permission draft. Selecting CodexAutoApproval first enables the
++plugin at workspace scope, waits for the successful native RPC/list refresh,
++then selects native `build`. Selecting any native permission first disables the
++plugin at workspace scope, then changes the native permission draft. Plan is an
++independent constraint and does not toggle the plugin. A previously enabled
++plugin aligns the idle composer with build. Workspace overrides take precedence
++over the user default; other workspaces retain their own effective settings.
++
++```mermaid
++sequenceDiagram
++  participant U as Permission menu
++  participant S as Plugin management store
++  participant H as Native plugin service/config
++  participant C as Composer draft owner
++  U->>S: Select option, workspace-scoped enabled command
++  S->>H: plugins/setEnabled
++  H-->>S: Persisted plugin result + refreshed effective listing
++  S-->>U: Success for the same workspace context
++  U->>C: build or selected native permission
++```
++
++Switching is locked while a workspace task is running or a toggle is pending.
++On RPC failure the existing store restores the projection, displays the error,
++and no native permission change is admitted. A stale workspace response cannot
++change the new workspace draft. Opening the menu refreshes the effective plugin
++state. The entry is hidden for non-Windows, browser and remote workspaces, and
++when this plugin is not installed. Keyboard cycling follows the same command
++path. Installed/enabled at user scope remains a default for new sessions;
++plugin enable is admitted only from a new-session composer. An existing session
++that has no enabled plugin cannot hot-load its frozen Hook catalog; its option
++is disabled with a new-session explanation. Disable remains available for idle
++existing sessions, and the activity bridge cancels/restores native approval.
++The bridge activity check merges user then project enable flags with the same
++last-defined precedence as native config; workspace enable can override user
++disable and must not be rejected by an independent any-false check.
++
++Desktop acceptance must verify four distinct radio entries, exact display name
++in the plugin settings, keyboard enable, native-mode disable with persisted
++workspace config, Plan independence, restored automatic review, original denial
++and failure behavior, and uninstall restoring native approval. Repack only an
++independent desktop copy; preserve the original installation and active app.
++
++The adapted production desktop uses `ZCode AutoReview` as its default runtime
++application identity. This preserves the existing adapted userData directory,
++avoids the official app's single-instance lock, and makes `ZCode.exe` directly
++launchable without a cmd environment wrapper. Development and Preview defaults,
++explicit test overrides and shared native user plugin settings stay unchanged.
++
++## 0.1.2 review-first lifecycle
++
++Only a loaded foreground CodexAutoApproval PermissionRequest process advertises
++review-first capability. Runtime tool permission flow owns the lifecycle keyed by
++requestId/toolCallId/turnId. Other permission hooks retain their responder race.
++Native hard denies and Plan constraints are checked before review. The native
++interaction registry owns each manual answer; projections never own decisions.
++
++Order: permission_review_started -> review hook -> permission_review_completed.
++Allow executes once without permission_requested; deny returns corrective feedback
++without execution or manual prompt. On technical failure the broker registers
++its answer receiver, then its onRegistered callback emits permission_requested
++with reviewFailure {code,message}, then starts the legacy client request.
++First and duplicate clicks share the existing one-shot registry. Cancellation
++closes the lease and clears projected progress; stale model, authorization,
++workspace, branch, or plugin state cannot authorize execution. At most three
++review attempts share one 90-second deadline. Persistent changes fall back.
++
++The host passes an immutable full TraceContext plus bound session/turn/query/tool
++identity into owner.complete. The stream runs inside explicit native invocation
++context with querySource=auto_review and truthful auxiliary session type=other;
++only the native adapter builds authentication and attribution headers. It uses
++streamText, collects text_delta and final tool_call events, keeps hidden
++reasoning only in private continuation state, rejects errors, truncated output and a missing finish. Selected
++provider/model/reasoning and min(8192, model maximum) output budget are preserved.
++
++Review events are durable session facts. Desktop and replay derive a reviewing
++label on the existing tool row, without creating a pending human interaction.
++Failure reasons cross contracts, bridge, v3 and v4 as bounded sanitized code/message.
++No credentials, raw provider bodies, or stack traces enter the permission dialog.
++The dialog says “自动审查失败，需人工确认” and exposes the sanitized cause.
++
++Local release is 0.1.2 under a new artifact directory; the installed desktop and
++user credentials are not replaced. Acceptance records include core/host checks,
++baseline-only failures, isolated Windows UI screenshots, SHA256 checksums, and
++a real current GLM review. Local stub success cannot prove server interception
++is fixed; record live failure and manual fallback if the real service rejects it.
++
++Admission also checks current native plugin activity through ApprovalBridgePort.isActive. A frozen loaded hook catalog after disable must not create another review-progress phase; an in-flight disable still cancels its existing lease and falls back.
++
++## 0.1.3 independent review model (normative current contract)
++
++### Configuration owner and interface
++
++The native plugin configuration service is the only owner of review selection.
++Use its existing user and workspace scopes; workspace values override the user
++default. Persist only a runtime-validated discriminated selection: inherit, or
++specified provider reference, model reference and optional supported reasoning
++level. An absent legacy option means inherit. No provider URL, protocol, API key
++or credential copy is stored in plugin options. No database migration is needed.
++The plugin settings expose follow-session / specified-model controls using the
++existing native model picker, reasoning options and provider-management screen.
++The provider screen owns custom Base URL, protocol and credentials. Saving must
++use the native plugins/configure command, survive restart and apply on the next
++review without changing the main session selection.
++
++The host reads effective configuration, validates its model reference against
++current native providers/models and supported reasoning/tool capabilities, then
++resolves the review model through native Chat Completions, Responses or Anthropic
++adapters. Deleted models, missing credentials, unsupported options/capabilities
++and malformed configuration yield specific technical failures and human approval.
++There is no fallback to a different provider or model.
++
++### Binding and lifetime
++
++Each approval snapshot binds the full action, real user authorization, session,
++turn, workspace identity/path, branch generation, main session selection, actual
++review selection and effective configuration version. The configuration version
++must reflect provider/model/credential changes as well as plugin options; values
++that may contain secrets stay host-only. Revalidate all fields before each model
++request, after it completes and before recording/executing a decision. A change
++invalidates the in-flight review immediately; its old result cannot authorize a
++new action. A permitted restart uses a fresh snapshot within the same three
++attempts and original 90-second deadline. Native calls use SingleAttempt.
++
++Runtime owns a private continuation map keyed by the active binding and review
++attempt. It preserves native assistant reasoning and provider metadata needed
++by that model's tool continuation. The host validates the visible transcript
++prefix before reconstructing subsequent native calls; the plugin cannot inject
++hidden state or receive it. Clear state on retry, stale binding, cancellation,
++disable, completion and lease close. Never share it with another review, the main
++model, plugin replies, progress, logs or delivery evidence. DeepSeek tool requests
++require complete previous reasoning_content, including assistant messages without
++tool calls: https://api-docs.deepseek.com/guides/thinking_mode/ .
++
++```mermaid
++sequenceDiagram
++  participant C as Native plugin/provider config
++  participant R as Session runtime (binding and continuation owner)
++  participant P as Approval plugin
++  participant M as Bound native model adapter
++  C-->>R: Effective selection and configuration version
++  R->>P: Bound action, authorization and visible context (bridge v2)
++  P->>R: Visible review transcript and read-only investigation schemas
++  R->>R: Validate snapshot and restore private continuation
++  R->>M: One attributed native stream
++  M-->>R: Visible output, tools, private reasoning and metadata
++  R->>R: Preserve private state for this binding only
++  R-->>P: Visible output and tools only
++  P-->>R: allow / deny / technical failure
++  R->>R: Revalidate, execute once or admit native human response
++  R->>R: Clear binding continuation
++```
++
++### Diagnostics and preserved policy
++
++Bridge v2 host and plugin ship together; a mismatched version fails to human
++approval. Progress and durable review records expose the actual review model.
++Failures may carry bounded business code, HTTP status, request id and retry
++information. All fields pass one sanitization boundary, excluding credentials,
++URLs with secrets, raw response bodies and stack traces. Explicit nonretryable
++provider interception stops immediately; technical failures do not increment
++policy denial counters. Preserve Codex policy, read-only investigation, native
++hard prohibits, Plan constraints, one-shot decisions, manual duplicate handling,
++truthful querySource=auto_review and the existing trace/session attribution.
++Do not bypass GLM interception by relabeling request identity.
++
++### Required acceptance and local delivery
++
++Test inherited/default and specified selection; custom providers; scope override;
++restart persistence; unchanged main model; missing/deleted/incompatible selection;
++allow executes once; deny executes zero times; 401, explicit service interception,
++broken stream, invalid output, timeout and cancellation; changing model/config or
++authorization during review; duplicate human responses; plugin disable. Force a
++read-only tool continuation and assert complete native hidden state, cross-review
++isolation and no state/credential leakage across the bridge or evidence.
++
++Run core, bridge and host regression on available Linux and Windows runtimes,
++isolated Windows UI regression, root and CLI typecheck/lint and architecture
++checks. Report baseline failures separately from new failures. Real Windows
++DeepSeek uses DEEPSEEK_API_KEY injected only into an isolated test host, official
++deepseek-flash with High reasoning. Clear temporary configuration on exit. Prove
++real automatic low-risk allow, controlled deny with a side-effect-free executor
++probe and file investigation. A missing key or transport restriction is an
++unverified scenario, never a success. Try GLM main session plus DeepSeek review;
++separately compare real same-account ordinary GLM and GLM review requests. Record
++their distinct outcomes; DeepSeek success does not prove GLM is unblocked.
++
++Deliver only locally under artifacts/0.1.3: independent Windows desktop, plugin
++ZIP, complete host patch, SHA256 checksums and sanitized acceptance report. Keep
++artifacts/0.1.2 intact for rollback. Update installation/configuration guidance
++and GLM status. No public publication, database migration or user-profile change.
++
++## Explicit provider interception diagnostics (2026-10-02)
++
++The current incident has a successful same-session GLM main request followed by
++an auto_review request rejected with status 405 and the explicit message
++`request has been blocked due to unusual activity.`. The recorded request is
++nonretryable and the effective reviewer inherits the main model. This is a
++technical failure before an approval decision, not a policy denial. These facts
++do not identify the provider's internal blocking rule or prove that any one
++request header caused it. Version 0.1.3 did not verify that GLM was unblocked.
++
++### Ownership and boundaries
++
++The existing host approval error boundary owns conversion of native model
++errors into the sanitized ApprovalReviewFailure contract. Recognize the explicit
++unusual-activity blocking message as `provider_request_blocked`, with
++`retryable: false`. A status code of 405 alone is insufficient: an ordinary
++Method Not Allowed error must retain its ordinary failure classification.
++Read only the native adapter's known diagnostic fields when they are nested in
++its error context; do not serialize arbitrary context, causes, response bodies,
++request headers, credentials, hidden reasoning, or stacks. Preserve bounded
++HTTP status and request id when present, with the existing sanitization rules.
++The plugin consumes the normalized error through the existing bridge; it does
++not classify provider errors, persist new failure state, or choose another model.
++
++```mermaid
++sequenceDiagram
++  participant M as Native model adapter
++  participant H as Existing host approval error boundary
++  participant P as Approval plugin
++  participant R as Permission runtime
++  participant U as Dialog and replay projection
++  M-->>H: Explicit nonretryable block, known diagnostic context
++  H-->>P: Sanitized provider_request_blocked, retryable=false
++  P-->>R: ask with technical failure (no policy assessment)
++  R->>R: Register one-shot human response receiver
++  R-->>U: Existing durable failure and permission-request events
++```
++
++No new mutable state, cooldown, retry owner, or persistence schema is introduced.
++The current lease, binding, cancellation, configuration invalidation, native
++SingleAttempt and overall three-attempt/90-second budget remain authoritative.
++Explicit interception terminates this review without another model call. It
++cannot authorize the action or increment the policy-denial breaker. Desktop
++continuous events and replay use the same existing failure contract.
++
++### User experience and acceptance
++
++The existing permission dialog explains in Chinese and English that the
++provider blocked the review request and the review could not complete. Offer
++the existing choices of manual handling or selecting an independently configured
++reviewer in Settings > Plugins > CodexAutoApproval > Advanced details > Review model.
++Keep the sanitized original diagnostic available. Do not promise that retry,
++changing a model, or changing a network will remove the provider restriction.
++Do not automatically change the user's model, credentials, querySource,
++sessionType, proxy, permissions, or account.
++
++Regression must cover the actual AiSdkModelAdapterError context shape; explicit
++blocking with 405; ordinary 405; existing authentication and transient failures;
++one native request for explicit blocking; no execution, no policy denial, manual
++fallback and first-response behavior; bounded/redacted diagnostic fields; and
++failure propagation into existing display/replay paths. Run available core,
++bridge/host, type, lint, architecture and UI checks and report runtime limitations.
++An isolated fixture demonstrates local behavior only. No successful GLM review
++may be claimed without a real successful provider request. Preserve existing
++release archives and user profiles; this repair does not itself release a build
++or change the installed application.
++
++## Stateless Responses review continuation (2026-10-02)
++
++An initial review transcript consists only of the plugin's system and user
++messages, with no tool calls or tool-result IDs. A two-message transcript that
++contains orphaned tool results must fail continuation validation rather than
++resetting the binding as if it were a new review. Pending native read calls must
++also have nonempty unique IDs before any result can be paired.
++
++### Request policy and ownership
++
++The observed custom deepseek-v4-flash Responses review completed its first
++request with a tool call, then failed its continuation with HTTP 400 and
++`No tool call found for tool output with call_id`. The native SDK defaults to
++store=true and may serialize a tool call carrying an itemId as an item_reference.
++Compatibility endpoints need not resolve that server-side history reference.
++This repair is separate from the GLM unusual-activity provider interception.
++
++The model adapter's request-option boundary owns a shared generate/stream
++policy. Apply it only when the resolved native provider is OpenAI Responses
++and the already-normalized statusContext.querySource is auto_review. Determine
++protocol from the resolved provider, not an untrusted request override. From
++the first review call, force openai.store=false and remove previousResponseId
++and conversation from this request's effective options. Merge base and request
++openai namespace fields without losing unrelated options; union and deduplicate
++include with reasoning.encrypted_content because custom reasoning model names
++may not be recognized by the SDK. Request options override base options, then
++the stateless review policy overrides store and removes server-history selectors.
++Pass the same final effective options to both message transformation and SDK
++invocation. Do not mutate configuration, caller-owned objects, or messages.
++
++Main-session Responses, Chat Completions, and Anthropic retain their current
++behavior. Reuse existing metadata and providerOptions contracts; introduce no
++public API, bridge version, persistent setting, environment variable, database
++change, provider fallback, or new retry owner.
++
++ApprovalContinuation remains the single owner of native history, keyed by the
++active binding and attempt. Preserve complete tool-call IDs, arguments, tool
++results and private reasoning/provider metadata. The SDK projects that history
++into complete function_call/function_call_output pairs and inline reasoning
++when store=false. Do not delete private reasoning or rewrite IDs to disguise a
++broken association. Invalid, missing, duplicate, or foreign results fail closed.
++
++```mermaid
++sequenceDiagram
++  participant R as Runtime and ApprovalContinuation
++  participant A as Native request-option adapter
++  participant M as Responses endpoint
++  participant P as Approval plugin
++  R->>A: Bound first request, auto_review
++  A->>M: store=false, encrypted reasoning requested
++  M-->>R: Tool calls and private native context
++  R->>R: Save full context under binding and attempt
++  R-->>P: Visible read-only tool calls
++  P->>R: Visible history and matching tool results
++  R->>R: Validate pairing and restore full native context
++  R->>A: Full bound continuation
++  A->>M: Full calls and results, no server-history selectors
++  M-->>R: Assessment or another read-only investigation
++```
++
++Existing cancellation, lease validity, model/configuration/authorization
++invalidation, one-shot decisions, technical-failure fallback and total retry/time
++budgets remain authoritative. Private continuation is never persisted as a new
++session fact or exposed in desktop live events, replay, plugin replies, or logs.
++
++### Regression and real acceptance
++
++Before changing production logic, reproduce the defect through a strict local
++HTTP Responses fixture using the native SDK, runtime continuation, bridge and
++real plugin child. First return a tool call with itemId and encrypted reasoning;
++reject an item_reference or orphaned/mismatched function_call_output on the
++continuation. Record the failing baseline and then require full calls/results,
++store=false, include, no previous_response_id/conversation, preserved private
++reasoning, and automatic allow-once/deny-without-execution behavior.
++
++Cover multiple rounds, parallel read calls in one round, cross-review isolation,
++wrong/missing/duplicate result IDs, option precedence and nonmutation. Keep
++main-session Responses and other protocols as explicit negative controls.
++Use synthetic values for wire assertions; real acceptance evidence contains
++only bounded sanitized diagnostics, counts and booleans, never raw bodies,
++headers, credentials or reasoning.
++
++Run two isolated read-only review examples against the existing configured
++deepseek-v4-flash Responses provider, locked to its native provider reference.
++Resolve credentials and network options through the host; do not change user
++configuration. Use temporary fixture files and a side-effect-free executor
++counter, not the user's deletion command. Each example must actually call a
++read tool, return its result to the same model, obtain an assessment, and avoid
++manual approval. Do not substitute another model/protocol, a local fixture, or
++a human click. Clean temporary private state after the run; report transport or
++provider failures as unverified live acceptance, never success.
++
++Rebuild changed native modules before dist-based tests, then run core,
++bridge/host/protocol regression plus required root and CLI typecheck/lint and
++architecture checks. Record environment and baseline failures separately.
++Deliver source, repeatable test commands and fresh acceptance receipts only;
++do not rebuild release ZIPs, replace desktop installations, modify profiles,
++upgrade dependencies, or publish. Root agent owns this spec and review;
++GPT-6.1-Sol owns implementation and test code.
+diff --git a/packages/desktop/build/autoreview-installer.nsh b/packages/desktop/build/autoreview-installer.nsh
+new file mode 100755
+index 0000000..1ece1da
+--- /dev/null
++++ b/packages/desktop/build/autoreview-installer.nsh
+@@ -0,0 +1,15 @@
++; 首装默认固定目录；升级由独立 appId 的注册项保留用户已选目录。
++!macro customInit
++  ReadRegStr $R1 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
++  !insertmacro GetDParameter $R0
++  ${If} $R1 == ""
++  ${AndIf} $R0 == ""
++    StrCpy $INSTDIR "D:\CodexAutoReview\zcode\runtime\ZCodeAutoReview"
++  ${EndIf}
++!macroend
++
++!macro customInstall
++  ; 缓存上一版安装器位于安装目录之外，重装/卸载均不删除会话与回退材料。
++  CreateDirectory "$LOCALAPPDATA\${PRODUCT_NAME}\installers"
++  CopyFiles /SILENT "$EXEPATH" "$LOCALAPPDATA\${PRODUCT_NAME}\installers\ZCodeAutoReview-${VERSION}.exe"
++!macroend
+diff --git a/packages/desktop/scripts/auto-review-release.mjs b/packages/desktop/scripts/auto-review-release.mjs
+new file mode 100755
+index 0000000..8d7c9c8
+--- /dev/null
++++ b/packages/desktop/scripts/auto-review-release.mjs
+@@ -0,0 +1,34 @@
++import { readFileSync } from "node:fs";
++import { resolve } from "node:path";
++
++export function readAutoReviewRelease(env = process.env) {
++  const file = env.ZCODE_AUTOREVIEW_RELEASE_FILE?.trim();
++  if (!file) return null;
++  const info = JSON.parse(readFileSync(resolve(file), "utf8"));
++  const acceptance = env.ZCODE_AUTOREVIEW_TEST_BUILD === "1";
++  const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
++  // 编译输入必须明确标记独立发行，防止错误配置生成能覆盖官方安装的包。
++  if (
++    info.schemaVersion !== 1 ||
++    info.applicationId !==
++      (acceptance ? "dev.codexautoreview.zcode.acceptance" : "dev.codexautoreview.zcode") ||
++    info.productName !== (acceptance ? "ZCode AutoReview Acceptance" : "ZCode AutoReview") ||
++    info.executableName !== "ZCodeAutoReview" ||
++    !stable.test(info.distributionVersion) ||
++    info.dataSchemaChanged !== false ||
++    !stable.test(info.upstreamVersion) ||
++    !/^[a-f0-9]{40}$/.test(info.upstreamCommit) ||
++    info.bridgeProtocol !== 2 ||
++    !stable.test(info.pluginVersion) ||
++    !Array.isArray(info.supportedPluginVersions) ||
++    !info.supportedPluginVersions.length ||
++    !info.supportedPluginVersions.every(version => typeof version === "string" && stable.test(version)) ||
++    !info.supportedPluginVersions.includes(info.pluginVersion) ||
++    info.repository !== "MagicSpirit007/CodexAutoApprovalZcode" ||
++    info.updateFeedUrl !==
++      `https://raw.githubusercontent.com/${info.repository}/main/updates/windows-x64/stable/`
++  ) {
++    throw new Error("Invalid AutoReview stable release configuration");
++  }
++  return Object.freeze(info);
++}
+diff --git a/packages/desktop/src/main/autoReviewInstallPreparation.ts b/packages/desktop/src/main/autoReviewInstallPreparation.ts
+new file mode 100755
+index 0000000..31cc984
+--- /dev/null
++++ b/packages/desktop/src/main/autoReviewInstallPreparation.ts
+@@ -0,0 +1,63 @@
++import { randomUUID } from "node:crypto";
++import { HostMessageTypes, hostResponseMessageSchema } from "@zcode/shared";
++import type { UtilityProcess } from "electron";
++
++/** Main 只协调生命周期；Host/CLI 对实际任务空闲负责。超时仅表示拒绝安装。 */
++export async function prepareAutoReviewHosts(hosts: UtilityProcess[], compatiblePluginVersions: string[]): Promise<() => void> {
++  if (!compatiblePluginVersions.length) throw new Error("Selected update plugin compatibility is missing");
++  const requestId = randomUUID();
++  const release = () => {
++    for (const host of hosts) {
++      try {
++        host.postMessage({ type: HostMessageTypes.UpdateInstallRelease, requestId });
++      } catch {
++        /* 已退出的 Host 无资源可恢复。 */
++      }
++    }
++  };
++  const results = await Promise.allSettled(
++    hosts.map(
++      (host) =>
++        new Promise<void>((resolve, reject) => {
++          const finish = (error?: Error) => {
++            clearTimeout(timer);
++            host.removeListener("message", onMessage);
++            host.removeListener("exit", onExit);
++            if (error) reject(error);
++            else resolve();
++          };
++          const onExit = () =>
++            finish(new Error("A workspace Host exited during update preparation"));
++          const onMessage = (raw: unknown) => {
++            const result = hostResponseMessageSchema.safeParse(raw);
++            if (
++              !result.success ||
++              result.data.type !== "update-install-prepared" ||
++              result.data.requestId !== requestId
++            )
++              return;
++            finish(
++              result.data.idle ? undefined : new Error(result.data.error ?? "Workspace is busy"),
++            );
++          };
++          const timer = setTimeout(
++            () => finish(new Error("Workspace did not confirm update readiness; retry")),
++            12_000,
++          );
++          host.on("message", onMessage);
++          host.once("exit", onExit);
++          try {
++            host.postMessage({ type: HostMessageTypes.UpdateInstallPrepare, requestId, compatiblePluginVersions });
++          } catch (error) {
++            finish(error instanceof Error ? error : new Error(String(error)));
++          }
++        }),
++    ),
++  );
++  const failure = results.find((result) => result.status === "rejected");
++  if (failure?.status === "rejected") {
++    release();
++    throw failure.reason;
++  }
++  return release;
++}
+diff --git a/packages/desktop/src/main/autoReviewInstallerIntegrity.ts b/packages/desktop/src/main/autoReviewInstallerIntegrity.ts
+new file mode 100755
+index 0000000..bb3840a
+--- /dev/null
++++ b/packages/desktop/src/main/autoReviewInstallerIntegrity.ts
+@@ -0,0 +1,17 @@
++import { createHash } from "node:crypto";
++import { createReadStream } from "node:fs";
++import { stat } from "node:fs/promises";
++
++/** 下载后缓存仍可能被改写；进入退出准备前重新核验，坏包不能关闭当前应用。 */
++export async function verifyAutoReviewInstallerIntegrity(
++  file: string,
++  expected: { size: number; sha512: string },
++): Promise<void> {
++  const info = await stat(file);
++  if (!info.isFile() || info.size !== expected.size)
++    throw new Error("Update installer size changed; download it again");
++  const hash = createHash("sha512");
++  for await (const chunk of createReadStream(file)) hash.update(chunk);
++  if (hash.digest("base64") !== expected.sha512)
++    throw new Error("Update installer checksum changed; download it again");
++}
+diff --git a/packages/desktop/src/main/autoReviewRelease.ts b/packages/desktop/src/main/autoReviewRelease.ts
+new file mode 100755
+index 0000000..d0b4b33
+--- /dev/null
++++ b/packages/desktop/src/main/autoReviewRelease.ts
+@@ -0,0 +1,9 @@
++import type { AutoReviewRelease } from "@zcode/shared";
++
++declare const __ZCODE_AUTOREVIEW_RELEASE__: AutoReviewRelease | null;
++declare const __ZCODE_AUTOREVIEW_TEST_BUILD__: boolean;
++// 生产身份只能来自编译输入；不接受工作区或继承环境改变更新仓库和应用身份。
++export const autoReviewRelease: Readonly<AutoReviewRelease> | null =
++  typeof __ZCODE_AUTOREVIEW_RELEASE__ === "undefined" ? null : __ZCODE_AUTOREVIEW_RELEASE__;
++export const autoReviewTestBuild =
++  typeof __ZCODE_AUTOREVIEW_TEST_BUILD__ !== "undefined" && __ZCODE_AUTOREVIEW_TEST_BUILD__;
+diff --git a/packages/desktop/src/main/autoReviewUpdateProvider.ts b/packages/desktop/src/main/autoReviewUpdateProvider.ts
+new file mode 100755
+index 0000000..5eb6e84
+--- /dev/null
++++ b/packages/desktop/src/main/autoReviewUpdateProvider.ts
+@@ -0,0 +1,120 @@
++import { readFile } from "node:fs/promises";
++import { join } from "node:path";
++import { getDataBaseDir } from "@zcode/services/node";
++import { validateAutoReviewUpdate, type AutoReviewUpdateManifest } from "@zcode/shared";
++import { type AppUpdater, type UpdateInfo, type ResolvedUpdateFileInfo } from "electron-updater";
++import { Provider } from "electron-updater/out/providers/Provider.js";
++import type { CustomPublishOptions } from "builder-util-runtime";
++import type { ProviderRuntimeOptions } from "electron-updater/out/providers/Provider.js";
++import { parse } from "yaml";
++import { autoReviewRelease, autoReviewTestBuild } from "./autoReviewRelease.js";
++import { verifyAutoReviewInstallerIntegrity } from "./autoReviewInstallerIntegrity.js";
++
++interface Options extends CustomPublishOptions {
++  url: string;
++}
++
++async function installedCodexVersions(): Promise<string[]> {
++  const file = join(getDataBaseDir(), ".zcode", "cli", "plugins", "installed_plugins.json");
++  let raw: string;
++  try {
++    raw = await readFile(file, "utf8");
++  } catch (error) {
++    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
++    throw error;
++  }
++  const state = JSON.parse(raw) as { plugins?: Array<{ name: string; version: string }> };
++  if (!Array.isArray(state.plugins)) throw new Error("Cannot verify installed plugin versions");
++  return state.plugins
++    .filter((plugin) => plugin.name === "codex-auto-approval")
++    .map((plugin) => plugin.version);
++}
++
++/** 只接独立稳定清单；metadata 校验先于 electron-updater 的版本与下载事件。 */
++export class AutoReviewUpdateProvider extends Provider<UpdateInfo> {
++  private readonly baseUrl: URL;
++  private readonly validated = new Map<string, AutoReviewUpdateManifest>();
++  constructor(options: Options, _updater: AppUpdater, runtime: ProviderRuntimeOptions) {
++    super(runtime);
++    if (!autoReviewRelease) throw new Error("AutoReview release identity missing");
++    const productionUrl = autoReviewRelease.updateFeedUrl;
++    if (options.url !== productionUrl && !autoReviewTestBuild)
++      throw new Error("AutoReview feed override rejected");
++    this.baseUrl = new URL(options.url);
++    if (
++      autoReviewTestBuild &&
++      options.url !== productionUrl &&
++      !["127.0.0.1", "localhost"].includes(this.baseUrl.hostname)
++    ) {
++      throw new Error("Acceptance feed must be loopback");
++    }
++  }
++  async getLatestVersion(): Promise<UpdateInfo> {
++    const info: unknown = parse(
++      (await this.httpRequest(new URL("latest.yml", this.baseUrl))) ?? "",
++    );
++    validateAutoReviewUpdate(
++      info,
++      autoReviewRelease!,
++      await installedCodexVersions(),
++      autoReviewTestBuild ? this.baseUrl.origin : undefined,
++    );
++    const previous = this.validated.get(info.version);
++    if (previous && JSON.stringify(previous) !== JSON.stringify(info)) {
++      throw new Error("Published AutoReview release metadata changed for the same version");
++    }
++    this.validated.set(info.version, info);
++    return {
++      ...info,
++      path: info.files[0]!.url,
++      sha512: info.files[0]!.sha512,
++      releaseDate: (info as unknown as { releaseDate?: string }).releaseDate ?? "",
++      releaseName: `ZCode AutoReview ${info.version} (ZCode ${info.autoReview.upstreamVersion})`,
++      zcodeReleaseChannel: "stable",
++    } as UpdateInfo;
++  }
++  async revalidate(version: string, installerFile?: string): Promise<void> {
++    const info = this.validated.get(version);
++    if (!info) throw new Error("Selected update has no validated release metadata");
++    validateAutoReviewUpdate(
++      info,
++      autoReviewRelease!,
++      await installedCodexVersions(),
++      autoReviewTestBuild ? this.baseUrl.origin : undefined,
++    );
++    if (installerFile) await verifyAutoReviewInstallerIntegrity(installerFile, info.files[0]!);
++  }
++  compatiblePluginVersions(version: string): string[] {
++    const info = this.validated.get(version);
++    if (!info) throw new Error("Selected update compatibility is unavailable");
++    return [...info.autoReview.supportedPluginVersions];
++  }
++  resolveFiles(info: UpdateInfo): ResolvedUpdateFileInfo[] {
++    validateAutoReviewUpdate(
++      info,
++      autoReviewRelease!,
++      [],
++      autoReviewTestBuild ? this.baseUrl.origin : undefined,
++    );
++    return info.files.map((file) => ({
++      url: new URL(file.url),
++      info: { ...file, url: new URL(file.url).pathname.split("/").pop()! },
++    }));
++  }
++}
++
++let activeProvider: AutoReviewUpdateProvider | null = null;
++export class ActiveAutoReviewUpdateProvider extends AutoReviewUpdateProvider {
++  constructor(options: Options, updater: AppUpdater, runtime: ProviderRuntimeOptions) {
++    super(options, updater, runtime);
++    activeProvider = this;
++  }
++}
++export async function revalidateAutoReviewUpdate(version: string, installerFile?: string): Promise<void> {
++  if (!activeProvider) throw new Error("AutoReview update provider unavailable");
++  await activeProvider.revalidate(version, installerFile);
++}
++export function autoReviewUpdateCompatiblePluginVersions(version: string): string[] {
++  if (!activeProvider) throw new Error("AutoReview update provider unavailable");
++  return activeProvider.compatiblePluginVersions(version);
++}

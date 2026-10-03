@@ -9,9 +9,10 @@ import zipfile
 import argparse
 
 ROOT = Path(__file__).resolve().parents[1]
+RELEASE = json.loads((ROOT / "release.config.json").read_text())
 parser = argparse.ArgumentParser()
-parser.add_argument("--out", type=Path, default=ROOT / "artifacts/0.1.3")
-parser.add_argument("--patch", type=Path, default=ROOT / "host-adapter/zcode-29628c9-auto-review.patch")
+parser.add_argument("--out", type=Path, default=ROOT / "artifacts/plugins" / RELEASE["pluginVersion"])
+parser.add_argument("--patch", type=Path, default=ROOT / "host-adapter/zcode-auto-review.patch")
 parser.add_argument("--checks", type=Path)
 parser.add_argument("--acceptance", type=Path, default=ROOT / "docs/desktop-acceptance.md")
 parser.add_argument("--plugin-only", action="store_true")
@@ -36,8 +37,8 @@ for name in ["config.js", "model.js", "reviewer.js", "tools.js", "util.js", "des
     copy_if_changed(ROOT / "src" / name, PLUGIN / "src" / name)
 manifest = json.loads((PLUGIN / ".zcode-plugin/plugin.json").read_text())
 metadata = json.loads((PLUGIN / "build-info.json").read_text())
-if manifest["version"] != "0.1.3" or metadata.get("bridgeProtocol") != 2:
-    raise SystemExit("Delivery requires plugin 0.1.3 and bridge protocol 2")
+if manifest["version"] != RELEASE["pluginVersion"] or metadata.get("bridgeProtocol") != RELEASE["bridgeProtocol"]:
+    raise SystemExit("Plugin version and bridge protocol must match release.config.json")
 
 plugin_only = args.plugin_only
 for required in [DESKTOP / "resources/glm/zcode.cjs", PATCH,

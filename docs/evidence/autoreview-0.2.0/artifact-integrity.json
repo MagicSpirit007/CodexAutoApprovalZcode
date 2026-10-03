@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-03T02:27:29.377Z",
+  "distributionVersion": "0.2.0",
+  "upstreamVersion": "3.14.3",
+  "upstreamCommit": "29628c9acdb81b703bbd4080c207a0e7ce5e276e",
+  "verification": "artifact-integrity-and-current-build-fingerprints",
+  "bundleMatchesFreshBuild": true,
+  "metadataHashesMatch": true,
+  "archiveParses": true,
+  "desktopEntrypointsMatchFreshBuild": true,
+  "responsesMarkersPresent": true,
+  "builtinProviderMatches": true,
+  "agentSha256": "637cdf60127a390f4232300756f0498a2c018416ce28cb7fb8d60fdff48961ef",
+  "desktopAsarSha256": "df9dec1c7ba2dfd69ee509704dd43c2c54ecf0943b7b2207acfc530734c3307e",
+  "limitation": "String fingerprints verify inclusion; behavioral continuation is covered by current source regression and live receipts, separately from desktop GUI smoke."
+}

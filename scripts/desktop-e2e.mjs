@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { readdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
 
 if (process.platform !== 'win32') throw new Error('Run with Windows Node');
 const liveGLM = process.argv.includes('--live-glm') || process.argv.includes('--glm-deepseek-review');
@@ -24,7 +25,13 @@ const diagnoseGLM = process.argv.includes('--diagnose-glm');
 if (independentDeepSeek && !process.env.DEEPSEEK_API_KEY) throw new Error('DEEPSEEK_API_KEY missing; scenario unverified');
 const childSafeEnv = { ...process.env };
 delete childSafeEnv.DEEPSEEK_API_KEY;
-const root = path.resolve('.'), output = path.join(root, 'artifacts/0.1.3/acceptance', independentDeepSeek ? 'glm-main-deepseek-review' : liveGLM ? 'live-glm' : 'windows');
+const option = name => { const at = process.argv.indexOf(`--${name}`); return at < 0 ? undefined : process.argv[at + 1]; };
+const root = path.resolve('.');
+const release = JSON.parse(await readFile(path.join(root, 'release.config.json'), 'utf8'));
+const output = path.resolve(option('output') ?? path.join(root, 'artifacts/autoreview', release.distributionVersion, 'acceptance', independentDeepSeek ? 'glm-main-deepseek-review' : liveGLM ? 'live-glm' : 'windows'));
+const fixtureBundle = path.resolve(option('fixture-bundle') ?? path.join(root, 'artifacts/autoreview/update-acceptance/desktop-fixture.bundle.mjs'));
+const desktop = path.resolve(option('desktop') ?? path.join(root, 'artifacts/autoreview', release.distributionVersion, 'win-unpacked', `${release.executableName}.exe`));
+const debugPort = Number(option('debug-port') ?? 9338);
 await mkdir(output, { recursive: true });
 const profile = liveGLM ? path.join(root, `.private-live-profile-${Date.now()}`) : path.join(output, `e2e-profile-${Date.now()}`);
 let cleanupApp, cleanupBrowser, cleanupServer, cleanupLiveSummary, cleanupLiveSummaryPath;
@@ -79,10 +86,10 @@ const server = createServer(async (req, res) => {
 });
 cleanupServer = server;
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const { prepareDesktopFixture, inspectDesktopFixture, toggleDesktopFixture, uninstallDesktopFixture, armDesktopFixtureApproval, sanitizeAcceptanceFailure, rekeyDesktopFixtureCredentials, probeNativeAccountCredential } = await import('../artifacts/0.1.3/acceptance/desktop-fixture.bundle.mjs');
+const { prepareDesktopFixture, inspectDesktopFixture, toggleDesktopFixture, uninstallDesktopFixture, armDesktopFixtureApproval, sanitizeAcceptanceFailure, rekeyDesktopFixtureCredentials, probeNativeAccountCredential, reinstallDesktopFixture } = await import(pathToFileURL(fixtureBundle).href);
 safeFailure = sanitizeAcceptanceFailure;
 failureStep = 'fixture-setup';
-const fixture = await prepareDesktopFixture(root, profile, server.address().port);
+const fixture = await prepareDesktopFixture(root, profile, server.address().port, { marketplace: path.resolve(option('marketplace') ?? root) });
 if (liveGLM) {
   // Read current native encrypted credentials only into a disposable isolated profile.
   for (const name of ['provider_config.json', 'credentials.json', 'setting.json', 'coding-plan-cache.json']) {
@@ -161,14 +168,15 @@ if (liveGLM) {
 }
 if (!liveGLM) await writeFile(path.join(output, 'desktop-e2e-discovery.json'), JSON.stringify(inspectDesktopFixture(fixture), null, 2));
 const desktopEnv = { ...process.env,
-    USERPROFILE: profile, ZCODE_DESKTOP_USER_DATA_DIR: path.join(profile, 'appdata'), ZCODE_DESKTOP_HOME_DIR: profile,
+    USERPROFILE: profile, APPDATA: path.join(profile, 'Roaming'), LOCALAPPDATA: path.join(profile, 'Local'), ZCODE_DESKTOP_USER_DATA_DIR: path.join(profile, 'appdata'), ZCODE_DESKTOP_HOME_DIR: profile,
     ZCODE_DATA_BASE_DIR: profile, ZCODE_STORAGE_DIR: fixture.storage,
     ZCODE_SESSION_DB_PATH: path.join(fixture.storage, 'test-session.sqlite') };
 delete desktopEnv.HOME;
 delete desktopEnv.ZCODE_DESKTOP_APPLICATION_NAME;
 delete desktopEnv.DEEPSEEK_API_KEY;
+delete desktopEnv.ELECTRON_RUN_AS_NODE;
 failureStep = 'desktop-launch';
-const app = spawn(path.join(root, 'artifacts/0.1.3/CodexAutoApproval-Windows/ZCode.exe'), ['--remote-debugging-port=9338', '--open-workspace', fixture.workspace], {
+const app = spawn(desktop, [`--remote-debugging-port=${debugPort}`, '--open-workspace', fixture.workspace], {
   env: desktopEnv, stdio: ['ignore', 'pipe', 'pipe'],
 });
 cleanupApp = app;
@@ -179,7 +187,7 @@ app.stderr.on('data', chunk => { if (!liveGLM) stderr += chunk; });
 try {
   let endpoint;
   for (let attempt = 0; attempt < 60; attempt++) {
-    try { endpoint = (await (await fetch('http://127.0.0.1:9338/json/version')).json()).webSocketDebuggerUrl; break; } catch {}
+    try { endpoint = (await (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).json()).webSocketDebuggerUrl; break; } catch {}
     await new Promise(resolve => setTimeout(resolve, 500));
   }
   assert.ok(endpoint, 'Desktop acceptance endpoint unavailable');
@@ -459,7 +467,6 @@ try {
     // The plugin was uninstalled by the last case; reinstall only in the isolated fixture
     // to verify its visible name through the real marketplace/installed-list UI.
     if (process.argv.includes('--all')) {
-      const { reinstallDesktopFixture } = await import('../artifacts/0.1.3/acceptance/desktop-fixture.bundle.mjs');
       await reinstallDesktopFixture(fixture);
       await page.getByTestId('plugin-store-sidebar-open').click();
       await page.getByTestId('plugin-store-manage-open').waitFor({ timeout: 30000 });
@@ -470,7 +477,7 @@ try {
       results.push({ scenario: 'plugin-display-name', passed: true, displayName: 'CodexAutoApproval' });
     }
     }
-    if (!liveGLM) await writeFile(path.join(output, 'desktop-e2e-results.json'), JSON.stringify({ fixture, source: 'extracted plugin ZIP',
+    if (!liveGLM) await writeFile(path.join(output, 'desktop-e2e-results.json'), JSON.stringify({ fixture, source: 'specified marketplace', desktop,
       directExecutableStartup: true, applicationIdentityOverride: false, results }, null, 2));
   }
 } catch (error) {

@@ -13,5 +13,5 @@ let patch = git(['diff', '--binary', '--no-ext-diff']);
 for (const file of git(['ls-files', '--others', '--exclude-standard']).trim().split('\n').filter(Boolean)) {
   patch += git(['diff', '--no-index', '--binary', '--', '/dev/null', file]);
 }
-await writeFile(resolve(process.argv[2] ?? resolve(root, 'host-adapter/zcode-29628c9-auto-review.patch')), patch);
+await writeFile(resolve(process.argv[2] ?? resolve(root, 'host-adapter/zcode-auto-review.patch')), patch);
 console.log('Complete host patch exported, including new ports, adapters and specification.');

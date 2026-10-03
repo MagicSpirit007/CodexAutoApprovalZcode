@@ -132,7 +132,9 @@ try {
   await mkdir(env.APPDATA, { recursive: true }); await mkdir(env.LOCALAPPDATA, { recursive: true });
   delete env.HOME; delete env.DEEPSEEK_API_KEY;
   summary.stage = 'desktop-launch';
-  app = spawn(path.join(desktop, 'ZCode.exe'), [`--remote-debugging-port=${debugPort}`, '--open-workspace', fixture.workspace], { env, stdio: 'ignore' });
+  delete env.ELECTRON_RUN_AS_NODE;
+  const release = JSON.parse(await readFile(path.resolve('release.config.json'), 'utf8'));
+  app = spawn(path.join(desktop, flags.get('executable') ?? `${release.executableName}.exe`), [`--remote-debugging-port=${debugPort}`, '--open-workspace', fixture.workspace], { env, stdio: 'ignore' });
   app.on('error', error => { summary.launchError = true; summary.launchErrorCode = ['ENOENT', 'EACCES', 'EPERM'].includes(error?.code) ? error.code : 'other'; });
   app.on('exit', (code, signal) => { summary.appExitCode = typeof code === 'number' ? code : null; summary.appExitSignal = signal ? 'signaled' : null; });
   summary.stage = 'endpoint-connect';

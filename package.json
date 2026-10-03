@@ -11,6 +11,8 @@
     "zcode": "bin/zcode.js"
   },
   "scripts": {
+    "test:updates": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/update-distribution.test.js test/stable-publisher.test.js",
+    "release:adapt": "node scripts/distribution-release.mjs",
     "start": "node bin/zcode.js",
     "test": "node --test test/approval.test.js test/cli.test.js test/model.test.js test/runtime.test.js test/clone-chat-review-config.test.js test/responses-acceptance-protocol.test.js",
     "test:desktop": "node --import ./host-adapter/upstream/node_modules/tsx/dist/loader.mjs --test test/desktop.test.js test/host-chain.test.js",

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "distributionVersion": "0.2.0",
+  "applicationId": "dev.codexautoreview.zcode",
+  "productName": "ZCode AutoReview",
+  "executableName": "ZCodeAutoReview",
+  "upstreamVersion": "3.14.3",
+  "upstreamTag": "v3.14.3",
+  "upstreamCommit": "29628c9acdb81b703bbd4080c207a0e7ce5e276e",
+  "codexCommit": "d42056091aded7feb1d88ac7e83972108b2aa478",
+  "bridgeProtocol": 2,
+  "pluginVersion": "0.1.3",
+  "supportedPluginVersions": ["0.1.3"],
+  "repository": "MagicSpirit007/CodexAutoApprovalZcode",
+  "updateFeedUrl": "https://raw.githubusercontent.com/MagicSpirit007/CodexAutoApprovalZcode/main/updates/windows-x64/stable/",
+  "defaultInstallDirectory": "D:\\CodexAutoReview\\zcode\\runtime\\ZCodeAutoReview",
+  "dataSchemaChanged": false
+}

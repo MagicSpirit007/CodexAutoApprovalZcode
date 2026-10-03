@@ -1,0 +1,2 @@
+*.patch text eol=lf
+updates/**/*.yml text eol=lf
